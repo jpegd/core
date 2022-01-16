@@ -1,0 +1,3 @@
+[submodule "jpegd-liquidator"]
+	path = jpegd-liquidator
+	url = https://github.com/0xspaghettidev/jpegd-liquidator
