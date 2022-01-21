@@ -19,7 +19,7 @@ contract YVaultLPFarming is Ownable {
     event Withdraw(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 rewards);
 
-    IYVault public vault;
+    IYVault public immutable vault;
     IERC20 public immutable jpeg;
 
     uint256 public totalStaked;
@@ -47,7 +47,9 @@ contract YVaultLPFarming is Ownable {
     }
 
     /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the farm.
-    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting farmers
+    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting farmers.
+    /// The {isContract} function returns false when `_account` is a contract executing constructor code.
+    /// This may lead to some contracts being able to bypass this check.
     /// @param _account Address to check
     modifier noContract(address _account) {
         require(
@@ -181,5 +183,10 @@ contract YVaultLPFarming is Ownable {
         userLastAccRewardPerShare[account] = accRewardPerShare;
 
         return pending;
+    }
+
+    /// @dev Prevent the owner from renouncing ownership. Having no owner would render this contract unusable due to the inability to create new epochs
+    function renounceOwnership() public view override onlyOwner {
+        revert("Cannot renounce ownership");
     }
 }

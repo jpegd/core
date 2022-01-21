@@ -54,7 +54,9 @@ contract YVault is ERC20, Ownable {
     }
 
     /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the vault.
-    /// Prevents non-whitelisted 3rd party contracts from diluting stakers
+    /// Prevents non-whitelisted 3rd party contracts from diluting stakers.
+    /// The {isContract} function returns false when `_account` is a contract executing constructor code.
+    /// This may lead to some contracts being able to bypass this check.
     /// @param _account Address to check
     modifier noContract(address _account) {
         require(
@@ -192,5 +194,10 @@ contract YVault is ERC20, Ownable {
         uint256 supply = totalSupply();
         if (supply == 0) return 0;
         return (balance() * 1e18) / supply;
+    }
+
+    /// @dev Prevent the owner from renouncing ownership. Having no owner would render this contract unusable due to the inability to create new epochs
+    function renounceOwnership() public view override onlyOwner {
+        revert("Cannot renounce ownership");
     }
 }

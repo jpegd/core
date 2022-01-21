@@ -690,7 +690,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             "debt_cap"
         );
 
-        if (nftContract.ownerOf(_nftIndex) != address(this)) {
+        if (positionOwner[_nftIndex] == address(0)) {
             _openPosition(msg.sender, _nftIndex);
         }
 

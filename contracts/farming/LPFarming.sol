@@ -78,7 +78,9 @@ contract LPFarming is Ownable, ReentrancyGuard {
     }
 
     /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the LP farm.
-    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting liquidity providers
+    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting liquidity providers.
+    /// The {isContract} function returns false when `_account` is a contract executing constructor code.
+    /// This may lead to some contracts being able to bypass this check.
     /// @param _account Address to check
     modifier noContract(address _account) {
         require(
