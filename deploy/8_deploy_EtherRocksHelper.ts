@@ -8,21 +8,21 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("deployer: ", deployer.address);
 
-  const Helper = await ethers.getContractFactory("CryptoPunksHelper");
-  const helper = await upgrades.deployProxy(Helper, [deployData.cryptoPunk]);
+  const Helper = await ethers.getContractFactory("EtherRocksHelper");
+  const helper = await upgrades.deployProxy(Helper, [deployData.etherRocks]);
   await helper.deployed();
-  console.log("CryptoPunksHelper deployed at: ", helper.address);
+  console.log("EtherRocksHelper deployed at: ", helper.address);
 
   const helperImplementation = await (
     await upgrades.admin.getInstance()
   ).getProxyImplementation(helper.address);
   console.log(
-    "CryptoPunksHelper implementation deployed at: ",
+    "EtherRocksHelper implementation deployed at: ",
     helperImplementation
   );
 
-  addresses.punksHelper = helper.address;
-  addresses.punksHelperImplementation = helperImplementation;
+  addresses.rocksHelper = helper.address;
+  addresses.rocksHelperImplementation = helperImplementation;
   fs.writeFileSync(
     "./deploy/addresses.json",
     JSON.stringify(addresses, null, 2)

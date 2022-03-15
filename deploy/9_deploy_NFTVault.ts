@@ -48,10 +48,27 @@ async function main() {
     }
   }
 
+  if (!deployData.rocksOracle) {
+    const TestFloorOracle = await ethers.getContractFactory("MockV3Aggregator");
+    const floorOracle = await TestFloorOracle.deploy(18, units(50));
+    await floorOracle.deployed();
+    addresses.rocksOracle = floorOracle.address;
+    deployData.rocksOracle = addresses.rocksOracle;
+
+    console.log("TestFloorOracle deployed at: ", floorOracle.address);
+
+    if (deployData.verify) {
+      await run("verify:verify", {
+        address: floorOracle.address,
+        constructorArguments: [18, units(50)],
+      });
+    }
+  }
+
   const NFTVault = await ethers.getContractFactory("NFTVault");
-  const nftVault = await upgrades.deployProxy(NFTVault, [
+  const punksNftVault = await upgrades.deployProxy(NFTVault, [
     addresses.stablecoin,
-    addresses.helper,
+    addresses.punksHelper,
     deployData.ethAggregator,
     deployData.jpegOracle,
     deployData.punkOracle,
@@ -67,7 +84,7 @@ async function main() {
         deployData.aliens,
       ],
     ],
-    addresses.jpegLock,
+    addresses.punksJpegLock,
     [
       [2, 100], //debtInterestApr
       [32, 100], //creditLimitRate
@@ -81,15 +98,37 @@ async function main() {
     ],
   ]);
 
-  await nftVault.deployed();
-  console.log("NFTVault deployed at: ", nftVault.address);
+  await punksNftVault.deployed();
+  console.log("Punks NFTVault deployed at: ", punksNftVault.address);
 
   const nftVaultImplementation = await (
     await upgrades.admin.getInstance()
-  ).getProxyImplementation(nftVault.address);
-  console.log("NFTVault implementation deployed at: ", nftVaultImplementation);
+  ).getProxyImplementation(punksNftVault.address);
+  console.log("Punks NFTVault implementation deployed at: ", nftVaultImplementation);
+  
+  const rocksNftVault = await upgrades.deployProxy(NFTVault, [
+    addresses.stablecoin,
+    addresses.rocksHelper,
+    deployData.ethAggregator,
+    deployData.jpegOracle,
+    deployData.punkOracle,
+    [],
+    addresses.rocksJpegLock,
+    [
+      [2, 100], //debtInterestApr
+      [32, 100], //creditLimitRate
+      [33, 100], //liquidationLimitRate
+      [25, 100], //valueIncreaseLockRate
+      [5, 1000], //organizationFeeRate
+      [1, 100], //insuranchePurchaseRate
+      [25, 100], //insuranceLiquidationPenaltyRate
+      86400 * 3, //insuranceRepurchaseLimit
+      units(3000).mul(1000), //borrowAmountCap
+    ],
+  ]);
 
-  addresses.nftVault = nftVault.address;
+  addresses.punksNftVault = punksNftVault.address;
+  addresses.rocksNftVault = rocksNftVault.address;
   addresses.nftVaultImplementation = nftVaultImplementation;
   fs.writeFileSync(
     "./deploy/addresses.json",
@@ -97,14 +136,27 @@ async function main() {
   );
 
   await (
-    await nftVault.grantRole(
+    await punksNftVault.grantRole(
       "0x3b5d4cc60d3ec3516ee8ae083bd60934f6eb2a6c54b1229985c41bfb092b2603",
       deployData.dao
     )
   ).wait(); //dao_role
 
   await (
-    await nftVault.revokeRole(
+    await rocksNftVault.grantRole(
+      "0x3b5d4cc60d3ec3516ee8ae083bd60934f6eb2a6c54b1229985c41bfb092b2603",
+      deployData.dao
+    )
+  ).wait(); //dao_role
+
+  await (
+    await rocksNftVault.revokeRole(
+      "0x3b5d4cc60d3ec3516ee8ae083bd60934f6eb2a6c54b1229985c41bfb092b2603",
+      deployer.address
+    )
+  ).wait(); //dao_role
+  await (
+    await punksNftVault.revokeRole(
       "0x3b5d4cc60d3ec3516ee8ae083bd60934f6eb2a6c54b1229985c41bfb092b2603",
       deployer.address
     )
@@ -114,18 +166,25 @@ async function main() {
     "StableCoin",
     addresses.stablecoin
   );
-  await (await stablecoin.grantRole(minter_role, nftVault.address)).wait();
+  await (await stablecoin.grantRole(minter_role, punksNftVault.address)).wait();
+  await (await stablecoin.grantRole(minter_role, rocksNftVault.address)).wait();
 
   const jpegLock = await ethers.getContractAt("JPEGLock", addresses.jpegLock);
 
-  await (await jpegLock.transferOwnership(nftVault.address)).wait();
+  await (await jpegLock.transferOwnership(rocksNftVault.address)).wait();
 
-  const helper = await ethers.getContractAt(
+  const punksHelper = await ethers.getContractAt(
     "CryptoPunksHelper",
-    addresses.helper
+    addresses.punksHelper
   );
 
-  await (await helper.transferOwnership(nftVault.address)).wait();
+  const rocksHelper = await ethers.getContractAt(
+    "EtherRocksHelper",
+    addresses.punksHelper
+  );
+
+  await (await punksHelper.transferOwnership(punksNftVault.address)).wait();
+  await (await rocksHelper.transferOwnership(rocksNftVault.address)).wait();
 
   if (deployData.verify) {
     await run("verify:verify", {

@@ -9,11 +9,16 @@ async function main() {
   console.log("deployer: ", deployer.address);
 
   const JPEGLock = await ethers.getContractFactory("JPEGLock");
-  const jpegLock = await JPEGLock.deploy(addresses.jpeg);
-  await jpegLock.deployed();
-  console.log("JPEGLock deployed at: ", jpegLock.address);
+  const punksJpegLock = await JPEGLock.deploy(addresses.jpeg);
+  await punksJpegLock.deployed();
+  console.log("Punks JPEGLock deployed at: ", punksJpegLock.address);
 
-  addresses.jpegLock = jpegLock.address;
+  const rocksJpegLock = await JPEGLock.deploy(addresses.jpeg);
+  await rocksJpegLock.deployed();
+  console.log("Rocks JPEGLock deployed at: ", rocksJpegLock.address);
+
+  addresses.punksJpegLock = punksJpegLock.address;
+  addresses.rocksJpegLock = rocksJpegLock.address;
   fs.writeFileSync(
     "./deploy/addresses.json",
     JSON.stringify(addresses, null, 2)
