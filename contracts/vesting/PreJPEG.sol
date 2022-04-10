@@ -25,7 +25,7 @@ contract PreJPEG is ERC20Votes, TokenVesting {
         uint256 start,
         uint256 cliffDuration,
         uint256 duration
-    ) public override {
+    ) public virtual override {
         super.vestTokens(
             beneficiary,
             totalAllocation,
