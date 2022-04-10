@@ -81,4 +81,11 @@ contract JPEGAirdropClaim is Ownable {
 
         hasClaimed[msg.sender] = true;
     }
+
+    /// @notice Withdraws tokens from this contract. Can only be called by the owner.
+    /// @param token The token to withdraw.
+    /// @param amount The amount of `token` to withdraw
+    function rescueToken(address token, uint256 amount) external onlyOwner {
+        IERC20(token).transfer(owner(), amount);
+    }
 }

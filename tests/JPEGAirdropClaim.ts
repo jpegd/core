@@ -132,4 +132,10 @@ describe("JPEGAirdropClaim", function () {
         const proof = merkleTree.getHexProof(keccak256(whitelistedUser1.address));
         await expect(airdropClaim.connect(user).claimAirdrop(proof)).to.be.revertedWith("INVALID_PROOF");
     });
+
+    it("should allow the owner to withdraw tokens", async () => {
+        await airdropClaim.rescueToken(jpeg.address, units(1000000000));
+
+        expect(await jpeg.balanceOf(owner.address)).to.equal(units(1000000000));
+    });
 });
