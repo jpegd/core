@@ -92,7 +92,7 @@ contract Controller is AccessControl {
         if (address(_current) != address(0)) {
             //withdraw all funds from the current strategy
             _current.withdrawAll();
-            _current.withdraw(address(jpeg));
+            _current.withdrawJPEG(address(this));
         }
         strategies[_token] = _strategy;
     }
