@@ -198,7 +198,10 @@ contract FungibleAssetVaultForDAO is
 
         collateralAmount -= amount;
 
-        if (collateralAsset == ETH) payable(msg.sender).transfer(amount);
+        if (collateralAsset == ETH) {
+            (bool sent,) = payable(msg.sender).call{value: amount}("");
+            require(sent, "ETH_TRANSFER_FAILED");
+        }
         else
             IERC20Upgradeable(collateralAsset).safeTransfer(msg.sender, amount);
 
