@@ -20,5 +20,5 @@ interface IBaseRewardPool {
 
     function rewardToken() external view returns (address);
 
-    function earned() external view returns (uint256);
+    function earned(address account) external view returns (uint256);
 }
