@@ -587,12 +587,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
 
         // Accrue interest
-        uint256 interestPerYear = (totalDebtAmount *
-            settings.debtInterestApr.numerator) /
-            settings.debtInterestApr.denominator;
-        uint256 interestPerSec = interestPerYear / 365 days;
-
-        return elapsedTime * interestPerSec;
+        return
+            (elapsedTime *
+                totalDebtAmount *
+                settings.debtInterestApr.numerator) /
+            settings.debtInterestApr.denominator /
+            365 days;
     }
 
     /// @notice Returns the number of open positions
