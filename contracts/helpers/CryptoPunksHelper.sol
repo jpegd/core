@@ -76,9 +76,8 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
             _executeTransfer(_from, _idx);
         }
 
-        require(
-            punks.punkIndexToAddress(_idx) == address(this), //this should never be false
-            "CryptoPunksHelper: not_deposited"
+        assert(
+            punks.punkIndexToAddress(_idx) == address(this) //this should never be false"
         );
 
         //If _to is the owner ({NFTVault}), we aren't sending the punk

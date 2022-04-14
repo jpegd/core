@@ -78,9 +78,8 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
 
         (address newOwner,,,) = rocks.getRockInfo(_idx);
 
-        require(
-            newOwner == address(this), //this should never be false
-            "EtherRocksHelper: not_deposited"
+        assert(
+            newOwner == address(this) //this should never be false
         );
 
         //remove rock from sale
