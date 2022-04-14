@@ -103,10 +103,10 @@ contract YVaultLPFarming is Ownable {
         _update();
         _withdrawReward(msg.sender);
 
-        vault.safeTransferFrom(msg.sender, address(this), _amount);
-
         balanceOf[msg.sender] += _amount;
         totalStaked += _amount;
+
+        vault.safeTransferFrom(msg.sender, address(this), _amount);
 
         emit Deposit(msg.sender, _amount);
     }
