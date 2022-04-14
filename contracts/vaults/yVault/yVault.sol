@@ -151,6 +151,9 @@ contract YVault is ERC20, Ownable {
             //balanceBefore can't be 0 if totalSupply is > 0
             shares = (_amount * supply) / balanceBefore;
         }
+
+        require(shares > 0, "ZERO_SHARES_MINTED");
+        
         _mint(msg.sender, shares);
 
         emit Deposit(msg.sender, _amount);
