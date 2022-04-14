@@ -456,7 +456,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        int256 answer = aggregator.latestAnswer();
+        (,int256 answer,,,) = aggregator.latestRoundData();
         uint8 decimals = aggregator.decimals();
 
         require(answer > 0, "invalid_oracle_answer");

@@ -102,7 +102,7 @@ contract FungibleAssetVaultForDAO is
     /// @dev Returns the USD price of one unit of collateral asset, using 18 decimals precision
     /// @return The USD price
     function _collateralPriceUsd() internal view returns (uint256) {
-        int256 answer = oracle.latestAnswer();
+        (,int256 answer,,,) = oracle.latestRoundData();
         uint8 decimals = oracle.decimals();
 
         require(answer > 0, "invalid_oracle_answer");
