@@ -222,8 +222,8 @@ contract LPFarming is Ownable, ReentrancyGuard {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
-        pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
         user.amount = user.amount + _amount;
+        pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
 
         emit Deposit(msg.sender, _pid, _amount);
     }
