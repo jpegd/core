@@ -79,12 +79,9 @@ contract LPFarming is Ownable, ReentrancyGuard {
 
     /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the LP farm.
     /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting liquidity providers.
-    /// The {isContract} function returns false when `_account` is a contract executing constructor code.
-    /// This may lead to some contracts being able to bypass this check.
-    /// @param _account Address to check
-    modifier noContract(address _account) {
+    modifier noContract() {
         require(
-            !_account.isContract() || whitelistedContracts[_account],
+            msg.sender == tx.origin || whitelistedContracts[msg.sender],
             "Contracts aren't allowed to farm"
         );
         _;
@@ -213,7 +210,7 @@ contract LPFarming is Ownable, ReentrancyGuard {
     /// @param _amount The amount of LP tokens to deposit
     function deposit(uint256 _pid, uint256 _amount)
         external
-        noContract(msg.sender)
+        noContract()
     {
         require(_amount > 0, "invalid_amount");
 
@@ -234,7 +231,7 @@ contract LPFarming is Ownable, ReentrancyGuard {
     /// @param _amount The amount of LP tokens to withdraw
     function withdraw(uint256 _pid, uint256 _amount)
         external
-        noContract(msg.sender)
+        noContract()
     {
         require(_amount > 0, "invalid_amount");
 
@@ -329,7 +326,7 @@ contract LPFarming is Ownable, ReentrancyGuard {
     /// @notice Allows users to claim rewards from the pool with id `_pid`. Non whitelisted contracts can't call this function
     /// @dev Emits a {Claim} event
     /// @param _pid The pool to claim rewards from
-    function claim(uint256 _pid) external nonReentrant noContract(msg.sender) {
+    function claim(uint256 _pid) external nonReentrant noContract() {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
@@ -344,7 +341,7 @@ contract LPFarming is Ownable, ReentrancyGuard {
 
     /// @notice Allows users to claim rewards from all pools. Non whitelisted contracts can't call this function
     /// @dev Emits a {ClaimAll} event
-    function claimAll() external nonReentrant noContract(msg.sender) {
+    function claimAll() external nonReentrant noContract() {
         for (uint256 i = 0; i < poolInfo.length; i++) {
             _updatePool(i);
             _withdrawReward(i);

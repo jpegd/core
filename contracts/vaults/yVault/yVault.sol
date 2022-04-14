@@ -53,15 +53,12 @@ contract YVault is ERC20, Ownable {
         token = ERC20(_token);
     }
 
-    /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the vault.
-    /// Prevents non-whitelisted 3rd party contracts from diluting stakers.
-    /// The {isContract} function returns false when `_account` is a contract executing constructor code.
-    /// This may lead to some contracts being able to bypass this check.
-    /// @param _account Address to check
-    modifier noContract(address _account) {
+    /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the LP farm.
+    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting liquidity providers.
+    modifier noContract() {
         require(
-            !_account.isContract() || whitelistedContracts[_account],
-            "Contracts not allowed"
+            msg.sender == tx.origin || whitelistedContracts[msg.sender],
+            "Contracts aren't allowed to farm"
         );
         _;
     }
@@ -139,7 +136,7 @@ contract YVault is ERC20, Ownable {
 
     /// @notice Allows users to deposit `token`. Contracts can't call this function
     /// @param _amount The amount to deposit
-    function deposit(uint256 _amount) public noContract(msg.sender) {
+    function deposit(uint256 _amount) public noContract() {
         require(_amount > 0, "INVALID_AMOUNT");
         uint256 balanceBefore = balance();
         token.safeTransferFrom(msg.sender, address(this), _amount);
@@ -163,7 +160,7 @@ contract YVault is ERC20, Ownable {
 
     /// @notice Allows users to withdraw tokens. Contracts can't call this function
     /// @param _shares The amount of shares to burn
-    function withdraw(uint256 _shares) public noContract(msg.sender) {
+    function withdraw(uint256 _shares) public noContract() {
         require(_shares > 0, "INVALID_AMOUNT");
 
         uint256 supply = totalSupply();
