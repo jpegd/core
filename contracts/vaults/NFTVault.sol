@@ -5,6 +5,7 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/IERC721Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/structs/EnumerableSetUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
@@ -17,6 +18,8 @@ import "../interfaces/IJPEGLock.sol";
 /// NFT by submitting a governance proposal. If the proposal is approved the user can lock a percentage of the new price
 /// worth of JPEG to make it effective
 contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+    using SafeERC20Upgradeable for IStableCoin;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
 
     event PositionOpened(address indexed owner, uint256 indexed index);
@@ -894,18 +897,18 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 penalty = (debtAmount *
             settings.insuranceLiquidationPenaltyRate.numerator) /
             settings.insuranceLiquidationPenaltyRate.denominator;
-
-        // transfer payment to liquidator
-        stablecoin.transferFrom(
-            msg.sender,
-            position.liquidator,
-            debtAmount + penalty
-        );
-
+        
         // transfer nft to user
         positionOwner[_nftIndex] = address(0);
         delete positions[_nftIndex];
         positionIndexes.remove(_nftIndex);
+
+        // transfer payment to liquidator
+        stablecoin.safeTransferFrom(
+            msg.sender,
+            position.liquidator,
+            debtAmount + penalty
+        );
 
         nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
 
