@@ -302,8 +302,11 @@ contract StrategyPUSDConvex is AccessControl {
     /// @param _to The address to send JPEG to
     function withdrawJPEG(address _to) external onlyController {
         // claim from convex rewards pool
-        convexConfig.baseRewardPool.getReward(address(this), true);
-        jpeg.safeTransfer(_to, jpeg.balanceOf(address(this)));
+        convexConfig.baseRewardPool.getReward(_to, true);
+        uint256 jpegBalance = jpeg.balanceOf(address(this));
+
+        if (jpegBalance > 0)
+            jpeg.safeTransfer(_to, jpegBalance);
     }
 
     /// @notice Allows members of the `STRATEGIST_ROLE` to compound Convex rewards into Curve
