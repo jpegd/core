@@ -3,7 +3,7 @@ import chai from "chai";
 import { solidity } from "ethereum-waffle";
 import { ethers, network } from "hardhat";
 import { JPEG, LPFarming, TestERC20 } from "../types";
-import { units, mineBlocks, checkAlmostSame } from "./utils";
+import { units, mineBlocks, checkAlmostSame, ZERO_ADDRESS } from "./utils";
 
 const { expect } = chai;
 
@@ -12,8 +12,7 @@ chai.use(solidity);
 describe("LPFarming", () => {
   let owner: SignerWithAddress,
     alice: SignerWithAddress,
-    bob: SignerWithAddress,
-    contract: SignerWithAddress;
+    bob: SignerWithAddress;
   let jpeg: JPEG, farming: LPFarming;
   let lpTokens: TestERC20[] = [];
 
@@ -22,9 +21,6 @@ describe("LPFarming", () => {
     owner = accounts[0];
     alice = accounts[1];
     bob = accounts[2];
-    contract = accounts[4];
-
-    await network.provider.send("hardhat_setCode", [contract.address, "0xab"]); //simulate a contract
 
     const JPEG = await ethers.getContractFactory("JPEG");
     jpeg = await JPEG.deploy(units(1000000000)); // 1B JPEG'd
@@ -174,15 +170,6 @@ describe("LPFarming", () => {
     expect(await farming.pendingReward(0, owner.address)).to.equal(4);
   });
 
-  it("should not allow non whitelisted contracts to farm", async () => {
-    await farming.add(10, lpTokens[0].address);
-    await lpTokens[0].transfer(contract.address, units(1000));
-    await lpTokens[0].connect(contract).approve(farming.address, units(1000));
-    await expect(
-      farming.connect(contract).deposit(0, units(1000))
-    ).to.be.revertedWith("Contracts aren't allowed to farm");
-  });
-
   it("should not allow 0 token deposits or withdrawals", async () => {
     await farming.add(10, lpTokens[0].address);
     await expect(farming.deposit(0, 0)).to.be.revertedWith("invalid_amount");
@@ -200,19 +187,10 @@ describe("LPFarming", () => {
     await expect(farming.claim(0)).to.reverted;
   });
 
-  it("should allow whitelisted contracts to farm", async () => {
-    await farming.add(10, lpTokens[0].address);
-    await lpTokens[0].transfer(contract.address, units(1000));
-    await lpTokens[0].connect(contract).approve(farming.address, units(1000));
-    await farming.setContractWhitelisted(contract.address, true);
-    await farming.connect(contract).deposit(0, units(1000));
-    await farming.connect(contract).withdraw(0, units(1000));
-  });
-
   it("users can deposit/withdraw/claim", async () => {
     let blockNumber = await ethers.provider.getBlockNumber();
     await farming.newEpoch(blockNumber + 1, blockNumber + 100000000000000, 100);
-    await jpeg.transfer(contract.address, await jpeg.balanceOf(owner.address));
+    await jpeg.transfer(jpeg.address, await jpeg.balanceOf(owner.address));
 
     await farming.add(20, lpTokens[0].address); // 50 JPEG per block
     await farming.add(10, lpTokens[1].address); // 25 JPEG per block
