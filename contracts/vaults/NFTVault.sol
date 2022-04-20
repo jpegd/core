@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
@@ -803,6 +803,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         accrue();
 
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
+        require(positions[_nftIndex].liquidatedAt == 0, "liquidated");
         require(_getDebtAmount(_nftIndex) == 0, "position_not_repaid");
 
         positionOwner[_nftIndex] = address(0);

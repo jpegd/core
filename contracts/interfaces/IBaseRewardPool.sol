@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 interface IBaseRewardPool {
     function withdrawAndUnwrap(uint256 amount, bool claim)
