@@ -16,8 +16,7 @@ const minter_role =
 
 describe("yVaultLPFarming", () => {
     let owner: SignerWithAddress,
-    user1: SignerWithAddress,
-    contract: SignerWithAddress;
+    user1: SignerWithAddress;
   //we are mocking the strategy because setting up the test environment for
   //{StrategyPUSDConvex} is complicated, check StrategyPUSDConvex.ts
   let strategy: MockStrategy;
@@ -28,9 +27,6 @@ describe("yVaultLPFarming", () => {
     const accounts = await ethers.getSigners();
     owner = accounts[0];
     user1 = accounts[1];
-    contract = accounts[2];
-
-    await network.provider.send("hardhat_setCode", [contract.address, "0xab"]); //simulate a contract
 
     const JPEG = await ethers.getContractFactory("JPEG");
     jpeg = await JPEG.deploy(units(0)); 
@@ -150,26 +146,5 @@ describe("yVaultLPFarming", () => {
     expect(await lpFarming.pendingReward(user1.address)).to.equal(0);
 
     await expect(lpFarming.claim()).to.be.revertedWith("no_reward");
-});
-
-it("should not allow non whitelisted contracts to farm", async () => {
-    await token.mint(owner.address, units(500));
-    await token.approve(yVault.address, units(500));
-    await yVault.depositAll();
-    await yVault.transfer(contract.address, units(500));
-    await yVault.connect(contract).approve(lpFarming.address, units(500));
-    await expect(
-      lpFarming.connect(contract).deposit(units(500))
-    ).to.be.revertedWith("Contracts aren't allowed to farm");
-  });
-
-  it("should allow whitelisted contracts to farm", async () => {
-    await token.mint(owner.address, units(500));
-    await token.approve(yVault.address, units(500));
-    await yVault.depositAll();
-    await yVault.transfer(contract.address, units(500));
-    await yVault.connect(contract).approve(lpFarming.address, units(500));
-    await lpFarming.setContractWhitelisted(contract.address, true);
-    await lpFarming.connect(contract).deposit(units(500));
   });
 });

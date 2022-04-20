@@ -16,8 +16,7 @@ const minter_role =
 
 describe("yVault", () => {
   let owner: SignerWithAddress,
-    user1: SignerWithAddress,
-    contract: SignerWithAddress;
+    user1: SignerWithAddress;
   //we are mocking the strategy because setting up the test environment for
   //{StrategyPUSDConvex} is complicated, check StrategyPUSDConvex.ts
   let strategy: MockStrategy;
@@ -28,9 +27,6 @@ describe("yVault", () => {
     const accounts = await ethers.getSigners();
     owner = accounts[0];
     user1 = accounts[1];
-    contract = accounts[2];
-
-    await network.provider.send("hardhat_setCode", [contract.address, "0xab"]); //simulate a contract
 
     const JPEG = await ethers.getContractFactory("JPEG");
     jpeg = await JPEG.deploy(0);
@@ -188,23 +184,5 @@ describe("yVault", () => {
 
     await yVault.connect(user1).withdrawAll();
     expect(await token.balanceOf(user1.address)).to.equal(units(1500));
-  });
-
-  it("should not allow non whitelisted contracts to deposit and withdraw", async () => {
-    await expect(
-      yVault.connect(contract).deposit(units(1000))
-    ).to.be.revertedWith("Contracts not allowed");
-    await expect(
-      yVault.connect(contract).withdraw(units(1000))
-    ).to.be.revertedWith("Contracts not allowed");
-  });
-
-  it("should allow whitelisted contracts to deposit/withdraw", async () => {
-    await token.mint(contract.address, units(1000));
-    await token.connect(contract).approve(yVault.address, units(1000));
-
-    await yVault.setContractWhitelisted(contract.address, true);
-    await yVault.connect(contract).depositAll();
-    await yVault.connect(contract).withdrawAll();
   });
 });

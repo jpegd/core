@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+import "../utils/NoContract.sol";
 
 /// @title JPEG'd LP Farming
 /// @notice Users can stake their JPEG'd ecosystem LP tokens to get JPEG rewards
@@ -13,9 +13,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /// To ensure that enough tokens are allocated, an epoch system is implemented.
 /// The owner is required to allocate enough tokens (`_rewardPerBlock * (_endBlock - _startBlock)`) when creating a new epoch.
 /// When there no epoch is ongoing, the contract stops emitting rewards
-contract LPFarming is Ownable, ReentrancyGuard {
+contract LPFarming is ReentrancyGuard, NoContract {
     using SafeERC20 for IERC20;
-    using Address for address;
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -68,33 +67,10 @@ contract LPFarming is Ownable, ReentrancyGuard {
 
     /// @dev User's (total) withdrawable rewards
     mapping(address => uint256) private userRewards;
-    /// @notice Contracts that are allowed to interact with the LP farm
-    /// @dev See the {noContract} modifier for more info
-    mapping(address => bool) public whitelistedContracts;
 
     /// @param _jpeg The reward token
     constructor(address _jpeg) {
         jpeg = IERC20(_jpeg);
-    }
-
-    /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the LP farm.
-    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting liquidity providers.
-    modifier noContract() {
-        require(
-            msg.sender == tx.origin || whitelistedContracts[msg.sender],
-            "Contracts aren't allowed to farm"
-        );
-        _;
-    }
-
-    /// @notice Allows the owner to whitelist/blacklist contracts
-    /// @param _contract The contract address to whitelist/blacklist
-    /// @param _isWhitelisted Whereter to whitelist or blacklist `_contract`
-    function setContractWhitelisted(address _contract, bool _isWhitelisted)
-        external
-        onlyOwner
-    {
-        whitelistedContracts[_contract] = _isWhitelisted;
     }
 
     /// @notice Allows the owner to start a new epoch. Can only be called when there's no ongoing epoch
