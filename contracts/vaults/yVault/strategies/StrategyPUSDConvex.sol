@@ -231,7 +231,7 @@ contract StrategyPUSDConvex is AccessControl {
         for (uint256 i = 0; i < length; i++) {
             IBaseRewardPool extraReward = IBaseRewardPool(baseRewardPool.extraRewards(i));
             if (address(jpeg) == extraReward.rewardToken()) {
-                availableBalance += extraReward.earned();
+                availableBalance += extraReward.earned(address(this));
                 //we found jpeg, no need to continue the loop
                 break;
             }
