@@ -125,6 +125,9 @@ contract YVault is ERC20, NoContract {
             //balanceBefore can't be 0 if totalSupply is > 0
             shares = (_amount * supply) / balanceBefore;
         }
+
+        require(shares > 0, "ZERO_SHARES_MINTED");
+        
         token.safeTransferFrom(msg.sender, address(this), _amount);
         _mint(msg.sender, shares);
 
