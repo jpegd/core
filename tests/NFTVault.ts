@@ -391,7 +391,7 @@ describe("NFTVault", () => {
     expect(position.liquidatable).to.be.equal(true);
 
     await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
-      "ERC20: burn amount exceeds allowance"
+      "ERC20: insufficient allowance"
     );
 
     await stablecoin.connect(dao).approve(nftVault.address, units(30000));
@@ -430,7 +430,7 @@ describe("NFTVault", () => {
     await ethOracle.updateAnswer(100e8);
 
     await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
-      "ERC20: burn amount exceeds allowance"
+      "ERC20: insufficient allowance"
     );
 
     await stablecoin.connect(dao).approve(nftVault.address, units(30000));

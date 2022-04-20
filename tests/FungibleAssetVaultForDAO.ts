@@ -124,7 +124,7 @@ describe("FungibleAssetVaultForDAO", () => {
       `AccessControl: account ${owner.address.toLowerCase()} is missing role ${whitelisted_role}`
     );
     await expect(usdcVault.connect(dao).deposit(depositAmount)).to.revertedWith(
-      "ERC20: transfer amount exceeds allowance"
+      "ERC20: insufficient allowance"
     );
     await usdc.connect(dao).approve(usdcVault.address, depositAmount);
     await usdcVault.connect(dao).deposit(depositAmount);
@@ -176,7 +176,7 @@ describe("FungibleAssetVaultForDAO", () => {
       `AccessControl: account ${owner.address.toLowerCase()} is missing role ${whitelisted_role}`
     );
     await expect(usdcVault.connect(dao).repay(repayAmount)).to.revertedWith(
-      "ERC20: burn amount exceeds allowance"
+      "ERC20: insufficient allowance"
     );
 
     // repay partial
