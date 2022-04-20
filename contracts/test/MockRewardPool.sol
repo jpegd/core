@@ -56,7 +56,7 @@ contract MockRewardPool is IBaseRewardPool {
         return extraRewards.length;
     }
 
-    function earned() external view override returns (uint256) {
+    function earned(address) external view override returns (uint256) {
         return IERC20(rewardToken).balanceOf(address(this));
     }
 }
