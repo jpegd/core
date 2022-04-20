@@ -32,7 +32,7 @@ describe("JPEGStaking", () => {
   it("stake should not work with invalid parameters", async () => {
     await expect(sJpegd.stake(0)).to.be.revertedWith("invalid_amount");
     await expect(sJpegd.stake(units(1))).to.be.revertedWith(
-      "ERC20: transfer amount exceeds allowance"
+      "ERC20: insufficient allowance"
     );
   });
 

@@ -16,8 +16,7 @@ const minter_role =
 
 describe("yVaultLPFarming", () => {
     let owner: SignerWithAddress,
-    user1: SignerWithAddress,
-    contract: SignerWithAddress;
+    user1: SignerWithAddress;
   //we are mocking the strategy because setting up the test environment for
   //{StrategyPUSDConvex} is complicated, check StrategyPUSDConvex.ts
   let strategy: MockStrategy;
@@ -28,9 +27,6 @@ describe("yVaultLPFarming", () => {
     const accounts = await ethers.getSigners();
     owner = accounts[0];
     user1 = accounts[1];
-    contract = accounts[2];
-
-    await network.provider.send("hardhat_setCode", [contract.address, "0xab"]); //simulate a contract
 
     const JPEG = await ethers.getContractFactory("JPEG");
     jpeg = await JPEG.deploy(units(0)); 
@@ -88,7 +84,7 @@ describe("yVaultLPFarming", () => {
   });
 
   it("should allow users to deposit tokens", async () => {
-      await expect(lpFarming.deposit(0)).to.be.revertedWith("invalid_amount");
+      await expect(lpFarming.deposit(0)).to.be.revertedWith("INVALID_AMOUNT");
 
       await token.mint(owner.address, units(500));
       await token.approve(yVault.address, units(500));
@@ -109,8 +105,8 @@ describe("yVaultLPFarming", () => {
     await yVault.approve(lpFarming.address, units(500));
     await lpFarming.deposit(units(500));
 
-    await expect(lpFarming.withdraw(0)).to.be.revertedWith("invalid_amount");
-    await expect(lpFarming.withdraw(units(600))).to.be.revertedWith("insufficient_amount");
+    await expect(lpFarming.withdraw(0)).to.be.revertedWith("INVALID_AMOUNT");
+    await expect(lpFarming.withdraw(units(600))).to.be.revertedWith("INSUFFICIENT_AMOUNT");
 
     await lpFarming.withdraw(units(500));
 
@@ -149,27 +145,39 @@ describe("yVaultLPFarming", () => {
     expect(await jpeg.balanceOf(user1.address)).to.equal(units(100));
     expect(await lpFarming.pendingReward(user1.address)).to.equal(0);
 
-    await expect(lpFarming.claim()).to.be.revertedWith("no_reward");
+    await expect(lpFarming.claim()).to.be.revertedWith("NO_REWARD");
 });
 
-it("should not allow non whitelisted contracts to farm", async () => {
+  it("should disable deposits and only account for already assigned rewards on migration", async () => {
     await token.mint(owner.address, units(500));
+    await token.mint(user1.address, units(500));
     await token.approve(yVault.address, units(500));
+    await token.connect(user1).approve(yVault.address, units(500));
     await yVault.depositAll();
-    await yVault.transfer(contract.address, units(500));
-    await yVault.connect(contract).approve(lpFarming.address, units(500));
-    await expect(
-      lpFarming.connect(contract).deposit(units(500))
-    ).to.be.revertedWith("Contracts aren't allowed to farm");
-  });
+    await yVault.connect(user1).depositAll();
 
-  it("should allow whitelisted contracts to farm", async () => {
-    await token.mint(owner.address, units(500));
-    await token.approve(yVault.address, units(500));
-    await yVault.depositAll();
-    await yVault.transfer(contract.address, units(500));
-    await yVault.connect(contract).approve(lpFarming.address, units(500));
-    await lpFarming.setContractWhitelisted(contract.address, true);
-    await lpFarming.connect(contract).deposit(units(500));
+    await yVault.approve(lpFarming.address, units(500));
+    await lpFarming.deposit(units(500));
+  
+    await jpeg.mint(strategy.address, units(500));
+
+    await yVault.connect(user1).approve(lpFarming.address, units(500));
+    await lpFarming.connect(user1).deposit(units(250));
+    await jpeg.mint(strategy.address, units(300));
+
+    await yVault.setFarmingPool(user1.address);
+
+    expect(await lpFarming.pendingReward(owner.address)).to.equal(units(700));
+    expect(await lpFarming.pendingReward(user1.address)).to.equal(units(100));
+
+    await jpeg.mint(strategy.address, units(300));
+
+    expect(await lpFarming.pendingReward(owner.address)).to.equal(units(700));
+    expect(await lpFarming.pendingReward(user1.address)).to.equal(units(100));
+
+    await expect(lpFarming.connect(user1).deposit(units(256))).to.be.revertedWith("DEPOSITS_DISABLED");
+
+    await lpFarming.withdraw(units(500));
+    await lpFarming.connect(user1).withdraw(units(250));
   });
 });

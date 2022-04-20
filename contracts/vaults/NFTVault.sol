@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
@@ -214,6 +214,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         onlyRole(DAO_ROLE)
     {
         _validateRate(_debtInterestApr);
+
+        accrue();
+
         settings.debtInterestApr = _debtInterestApr;
     }
 
@@ -456,10 +459,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        int256 answer = aggregator.latestAnswer();
-        uint8 decimals = aggregator.decimals();
+        (,int256 answer,,uint256 timestamp,) = aggregator.latestRoundData();
 
         require(answer > 0, "invalid_oracle_answer");
+        require(timestamp > 0, "round_incomplete");
+
+        uint8 decimals = aggregator.decimals();
         //converts the answer to have 18 decimals
         return
             decimals > 18
@@ -557,18 +562,10 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _owner The owner of the position to open
     /// @param _nftIndex The NFT used as collateral for the position
     function _openPosition(address _owner, uint256 _nftIndex) internal {
-        nftContract.transferFrom(_owner, address(this), _nftIndex);
-
-        positions[_nftIndex] = Position({
-            borrowType: BorrowType.NOT_CONFIRMED,
-            debtPrincipal: 0,
-            debtPortion: 0,
-            debtAmountForRepurchase: 0,
-            liquidatedAt: 0,
-            liquidator: address(0)
-        });
         positionOwner[_nftIndex] = _owner;
         positionIndexes.add(_nftIndex);
+
+        nftContract.transferFrom(_owner, address(this), _nftIndex);
 
         emit PositionOpened(_owner, _nftIndex);
     }
@@ -587,12 +584,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
 
         // Accrue interest
-        uint256 interestPerYear = (totalDebtAmount *
-            settings.debtInterestApr.numerator) /
-            settings.debtInterestApr.denominator;
-        uint256 interestPerSec = interestPerYear / 365 days;
-
-        return elapsedTime * interestPerSec;
+        return
+            (elapsedTime *
+                totalDebtAmount *
+                settings.debtInterestApr.numerator) /
+            settings.debtInterestApr.denominator /
+            365 days;
     }
 
     /// @notice Returns the number of open positions
@@ -690,10 +687,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             "debt_cap"
         );
 
-        if (positionOwner[_nftIndex] == address(0)) {
-            _openPosition(msg.sender, _nftIndex);
-        }
-
         Position storage position = positions[_nftIndex];
         require(position.liquidatedAt == 0, "liquidated");
         require(
@@ -722,8 +715,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                 settings.insurancePurchaseRate.denominator;
         }
         totalFeeCollected += feeAmount;
-        //subtract the fee from the amount borrowed
-        stablecoin.mint(msg.sender, _amount - feeAmount);
 
         if (position.borrowType == BorrowType.NOT_CONFIRMED) {
             position.borrowType = _useInsurance
@@ -743,6 +734,13 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
         position.debtPrincipal += _amount;
         totalDebtAmount += _amount;
+
+        if (positionOwner[_nftIndex] == address(0)) {
+            _openPosition(msg.sender, _nftIndex);
+        }
+
+        //subtract the fee from the amount borrowed
+        stablecoin.mint(msg.sender, _amount - feeAmount);
 
         emit Borrowed(msg.sender, _nftIndex, _amount);
     }
@@ -799,10 +797,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function closePosition(uint256 _nftIndex)
         external
         validNFTIndex(_nftIndex)
+        nonReentrant
     {
         accrue();
 
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
+        require(positions[_nftIndex].liquidatedAt == 0, "liquidated");
         require(_getDebtAmount(_nftIndex) == 0, "position_not_repaid");
 
         positionOwner[_nftIndex] = address(0);
@@ -876,7 +876,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// the position had at the time of liquidation, plus an insurance liquidation fee defined with `insuranceLiquidationPenaltyRate`
     /// @dev Emits a {Repurchased} event
     /// @param _nftIndex The NFT to repurchase
-    function repurchase(uint256 _nftIndex) external validNFTIndex(_nftIndex) {
+    function repurchase(uint256 _nftIndex)
+        external
+        validNFTIndex(_nftIndex)
+        nonReentrant
+    {
         Position memory position = positions[_nftIndex];
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
         require(position.liquidatedAt > 0, "not_liquidated");
@@ -919,6 +923,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function claimExpiredInsuranceNFT(uint256 _nftIndex)
         external
         validNFTIndex(_nftIndex)
+        nonReentrant
     {
         Position memory position = positions[_nftIndex];
         address owner = positionOwner[_nftIndex];

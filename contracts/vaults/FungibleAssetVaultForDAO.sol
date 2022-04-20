@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
@@ -102,10 +102,12 @@ contract FungibleAssetVaultForDAO is
     /// @dev Returns the USD price of one unit of collateral asset, using 18 decimals precision
     /// @return The USD price
     function _collateralPriceUsd() internal view returns (uint256) {
-        int256 answer = oracle.latestAnswer();
-        uint8 decimals = oracle.decimals();
+        (,int256 answer,,uint256 timestamp,) = oracle.latestRoundData();
 
         require(answer > 0, "invalid_oracle_answer");
+        require(timestamp > 0, "round_incomplete");
+
+        uint8 decimals = oracle.decimals();
 
         //check chainlink's precision and convert it to 18 decimals
         return
@@ -198,7 +200,10 @@ contract FungibleAssetVaultForDAO is
 
         collateralAmount -= amount;
 
-        if (collateralAsset == ETH) payable(msg.sender).transfer(amount);
+        if (collateralAsset == ETH) {
+            (bool sent,) = payable(msg.sender).call{value: amount}("");
+            require(sent, "ETH_TRANSFER_FAILED");
+        }
         else
             IERC20Upgradeable(collateralAsset).safeTransfer(msg.sender, amount);
 

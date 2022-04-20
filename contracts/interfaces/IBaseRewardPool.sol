@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 interface IBaseRewardPool {
     function withdrawAndUnwrap(uint256 amount, bool claim)
@@ -20,5 +20,5 @@ interface IBaseRewardPool {
 
     function rewardToken() external view returns (address);
 
-    function earned() external view returns (uint256);
+    function earned(address account) external view returns (uint256);
 }
