@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 interface ICryptoPunks {
     function transferPunk(address _to, uint256 _punkIndex) external;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 contract CryptoPunks {
     // You can use this hash to verify the image file containing all the punks

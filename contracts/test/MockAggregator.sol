@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "../interfaces/IAggregatorV3Interface.sol";
 
@@ -15,7 +15,7 @@ contract MockV3Aggregator is IAggregatorV3Interface {
   uint256 constant public version = 0;
 
   uint8 public override decimals;
-  int256 public override latestAnswer;
+  int256 public latestAnswer;
   uint256 public latestTimestamp;
   uint256 public latestRound;
 
@@ -78,6 +78,7 @@ contract MockV3Aggregator is IAggregatorV3Interface {
 
   function latestRoundData()
     external
+    override
     view
     returns (
       uint80 roundId,

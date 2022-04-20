@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
@@ -456,10 +456,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        int256 answer = aggregator.latestAnswer();
-        uint8 decimals = aggregator.decimals();
+        (,int256 answer,,uint256 timestamp,) = aggregator.latestRoundData();
 
         require(answer > 0, "invalid_oracle_answer");
+        require(timestamp > 0, "round_incomplete");
+
+        uint8 decimals = aggregator.decimals();
         //converts the answer to have 18 decimals
         return
             decimals > 18
@@ -587,12 +589,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
 
         // Accrue interest
-        uint256 interestPerYear = (totalDebtAmount *
-            settings.debtInterestApr.numerator) /
-            settings.debtInterestApr.denominator;
-        uint256 interestPerSec = interestPerYear / 365 days;
-
-        return elapsedTime * interestPerSec;
+        return
+            (elapsedTime *
+                totalDebtAmount *
+                settings.debtInterestApr.numerator) /
+            settings.debtInterestApr.denominator /
+            365 days;
     }
 
     /// @notice Returns the number of open positions
@@ -803,6 +805,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         accrue();
 
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
+        require(positions[_nftIndex].liquidatedAt == 0, "liquidated");
         require(_getDebtAmount(_nftIndex) == 0, "position_not_repaid");
 
         positionOwner[_nftIndex] = address(0);

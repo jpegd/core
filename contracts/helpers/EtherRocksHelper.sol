@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
@@ -78,9 +78,8 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
 
         (address newOwner,,,) = rocks.getRockInfo(_idx);
 
-        require(
-            newOwner == address(this), //this should never be false
-            "EtherRocksHelper: not_deposited"
+        assert(
+            newOwner == address(this) //this should never be false
         );
 
         //remove rock from sale

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -56,7 +56,7 @@ contract MockRewardPool is IBaseRewardPool {
         return extraRewards.length;
     }
 
-    function earned() external view override returns (uint256) {
+    function earned(address) external view override returns (uint256) {
         return IERC20(rewardToken).balanceOf(address(this));
     }
 }

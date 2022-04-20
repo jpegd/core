@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
 
+import "../utils/NoContract.sol";
 import "../interfaces/IYVault.sol";
 
 /// @title JPEG'd yVault token farm
 /// @notice Users can stake their JPEG'd vault tokens and earn JPEG rewards
 /// @dev The rewards are taken from the PUSD Convex pool and distributed to stakers based on their share of the total staked tokens.
-contract YVaultLPFarming is Ownable {
+contract YVaultLPFarming is NoContract {
     using SafeERC20 for IERC20;
     using SafeERC20 for IYVault;
-    using Address for address;
 
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount);
@@ -33,10 +31,6 @@ contract YVaultLPFarming is Ownable {
     mapping(address => uint256) private userLastAccRewardPerShare;
     mapping(address => uint256) private userPendingRewards;
 
-    /// @notice Contracts that are allowed to interact with the LP farm
-    /// @dev See the {noContract} modifier for more info
-    mapping(address => bool) public whitelistedContracts;
-
     ///@param _vault The yVault address
     ///@param _jpeg The JPEG token address
     constructor(address _vault, address _jpeg) {
@@ -45,29 +39,6 @@ contract YVaultLPFarming is Ownable {
 
         vault = IYVault(_vault);
         jpeg = IERC20(_jpeg);
-    }
-
-    /// @dev Modifier that ensures that non-whitelisted contracts can't interact with the farm.
-    /// Prevents non-whitelisted 3rd party contracts (e.g. autocompounders) from diluting farmers.
-    /// The {isContract} function returns false when `_account` is a contract executing constructor code.
-    /// This may lead to some contracts being able to bypass this check.
-    /// @param _account Address to check
-    modifier noContract(address _account) {
-        require(
-            !_account.isContract() || whitelistedContracts[_account],
-            "Contracts aren't allowed to farm"
-        );
-        _;
-    }
-
-    /// @notice Allows the owner to whitelist/blacklist contracts
-    /// @param _contract The contract address to whitelist/blacklist
-    /// @param _isWhitelisted Whereter to whitelist or blacklist `_contract`
-    function setContractWhitelisted(address _contract, bool _isWhitelisted)
-        external
-        onlyOwner
-    {
-        whitelistedContracts[_contract] = _isWhitelisted;
     }
 
     /// @notice Frontend function used to calculate the amount of rewards `_user` can claim
@@ -101,17 +72,17 @@ contract YVaultLPFarming is Ownable {
     /// @notice Allows users to deposit `_amount` of vault tokens. Non whitelisted contracts can't call this function
     /// @dev Emits a {Deposit} event
     /// @param _amount The amount of tokens to deposit
-    function deposit(uint256 _amount) external noContract(msg.sender) {
+    function deposit(uint256 _amount) external noContract() {
         require(_amount > 0, "INVALID_AMOUNT");
         require(!isMigrating, "DEPOSITS_DISABLED");
 
         _update();
         _withdrawReward(msg.sender);
 
-        vault.safeTransferFrom(msg.sender, address(this), _amount);
-
         balanceOf[msg.sender] += _amount;
         totalStaked += _amount;
+
+        vault.safeTransferFrom(msg.sender, address(this), _amount);
 
         emit Deposit(msg.sender, _amount);
     }
@@ -119,7 +90,7 @@ contract YVaultLPFarming is Ownable {
     /// @notice Allows users to withdraw `_amount` of vault tokens. Non whitelisted contracts can't call this function
     /// @dev Emits a {Withdraw} event
     /// @param _amount The amount of tokens to withdraw
-    function withdraw(uint256 _amount) external noContract(msg.sender) {
+    function withdraw(uint256 _amount) external noContract() {
         require(_amount > 0, "INVALID_AMOUNT");
         require(balanceOf[msg.sender] >= _amount, "INSUFFICIENT_AMOUNT");
 
@@ -136,7 +107,7 @@ contract YVaultLPFarming is Ownable {
 
     /// @notice Allows users to claim rewards. Non whitelisted contracts can't call this function
     /// @dev Emits a {Claim} event
-    function claim() external noContract(msg.sender) {
+    function claim() external noContract() {
         _update();
         _withdrawReward(msg.sender);
 

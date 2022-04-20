@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -231,7 +231,7 @@ contract StrategyPUSDConvex is AccessControl {
         for (uint256 i = 0; i < length; i++) {
             IBaseRewardPool extraReward = IBaseRewardPool(baseRewardPool.extraRewards(i));
             if (address(jpeg) == extraReward.rewardToken()) {
-                availableBalance += extraReward.earned();
+                availableBalance += extraReward.earned(address(this));
                 //we found jpeg, no need to continue the loop
                 break;
             }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -178,15 +178,18 @@ contract TokenSale is Ownable, ReentrancyGuard {
             address token = supportedTokens[i];
             SupportedToken storage tokenData = supportedTokensData[token];
 
-            uint256 answer = IAggregatorV3Interface(tokenData.oracle)
-                .latestAnswer()
-                .toUint256();
+            (,int256 answer,,uint256 timestamp,) = IAggregatorV3Interface(tokenData.oracle)
+                .latestRoundData();
+
+            require(timestamp > 0, "ROUND_INCOMPLETE");
             require(answer > 0, "INVALID_ORACLE_ANSWER");
 
+            uint256 convertedAnswer = answer.toUint256();
+
             value +=
-                (tokenData.totalRaised * answer) /
+                (tokenData.totalRaised * convertedAnswer) /
                 10**ERC20(token).decimals(); //Chainlink USD prices are always to 8
-            tokenData.USDPrice = answer;
+            tokenData.USDPrice = convertedAnswer;
         }
 
         totalRaisedUSD = value;
