@@ -459,6 +459,30 @@ describe("NFTVault", () => {
     expect(await nftVault.totalPositions()).to.equal(1);
   });
 
+  it("shouldn't allow closing liquidated positions with insurance without repaying", async () => {
+    const index = 6000;
+    await erc721.mint(user.address, index);
+
+    await erc721.connect(user).approve(nftVault.address, index);
+    const borrowAmount = units(2000);
+    await nftVault.connect(user).borrow(index, borrowAmount, true);
+
+    // dao prepares 30000 PUSD
+    const prepareAmount = units(30000);
+    await usdc.mint(dao.address, prepareAmount);
+    await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
+    await usdcVault.connect(dao).deposit(prepareAmount);
+    await usdcVault.connect(dao).borrow(prepareAmount);
+
+    // treat to change eth price
+    await ethOracle.updateAnswer(100e8);
+
+    await stablecoin.connect(dao).approve(nftVault.address, units(30000));
+    await nftVault.connect(dao).liquidate(index);
+
+    await expect(nftVault.connect(user).closePosition(index)).to.be.revertedWith("liquidated");
+  });
+
   it("should be able to repurchase", async () => {
     await expect(nftVault.repurchase(10001)).to.be.revertedWith("invalid_nft");
     await erc721.mint(owner.address, 1);
