@@ -34,11 +34,13 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @param allocPoint Allocation points assigned to the pool. Determines the share of `rewardPerBlock` allocated to this pool
     /// @param lastRewardBlock Last block number in which reward distribution occurred
     /// @param accRewardPerShare Accumulated rewards per share, times 1e36. The amount of rewards the pool has accumulated per unit of LP token deposited
+    /// @param depositedAmount Total number of tokens deposited in the pool.
     struct PoolInfo {
         IERC20 lpToken;
         uint256 allocPoint;
         uint256 lastRewardBlock;
         uint256 accRewardPerShare;
+        uint256 depositedAmount;
     }
 
     /// @dev Data relative to an epoch
@@ -121,7 +123,8 @@ contract LPFarming is ReentrancyGuard, NoContract {
                 lpToken: _lpToken,
                 allocPoint: _allocPoint,
                 lastRewardBlock: lastRewardBlock,
-                accRewardPerShare: 0
+                accRewardPerShare: 0,
+                depositedAmount: 0
             })
         );
     }
@@ -160,7 +163,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
         uint256 blockNumber = _blockNumber();
         //normalizing the pool's `lastRewardBlock` ensures that no rewards are distributed by staking outside of an epoch
         uint256 lastRewardBlock = _normalizeBlockNumber(pool.lastRewardBlock);
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        uint256 lpSupply = pool.depositedAmount;
         //if blockNumber is greater than the pool's `lastRewardBlock` the pool's `accRewardPerShare` is outdated,
         //we need to calculate the up to date amount to return an accurate reward value
         if (blockNumber > lastRewardBlock && lpSupply != 0) {
@@ -195,7 +198,8 @@ contract LPFarming is ReentrancyGuard, NoContract {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
-        user.amount = user.amount + _amount;
+        pool.depositedAmount += _amount;
+        user.amount += _amount;
         pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
 
         emit Deposit(msg.sender, _pid, _amount);
@@ -218,6 +222,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
+        pool.depositedAmount -= _amount;
         user.amount -= _amount;
         pool.lpToken.safeTransfer(address(msg.sender), _amount);
 
@@ -270,7 +275,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
         if (blockNumber <= lastRewardBlock) {
             return;
         }
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        uint256 lpSupply = pool.depositedAmount;
         if (lpSupply == 0) {
             pool.lastRewardBlock = blockNumber;
             return;
