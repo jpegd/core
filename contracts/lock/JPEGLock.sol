@@ -51,13 +51,19 @@ contract JPEGLock is Ownable, ReentrancyGuard {
         uint256 _nftIndex,
         uint256 _lockAmount
     ) external onlyOwner nonReentrant {
-        jpeg.safeTransferFrom(_account, address(this), _lockAmount);
+        address currentOwner = positions[_nftIndex].owner;
+        uint256 currentLockAmount = positions[_nftIndex].lockAmount;
 
         positions[_nftIndex] = LockPosition({
             owner: _account,
             unlockAt: block.timestamp + lockTime,
             lockAmount: _lockAmount
         });
+
+        if (currentOwner != address(0))
+            jpeg.safeTransfer(currentOwner, currentLockAmount);
+
+        jpeg.safeTransferFrom(_account, address(this), _lockAmount);
 
         emit Lock(_account, _nftIndex, _lockAmount);
     }
