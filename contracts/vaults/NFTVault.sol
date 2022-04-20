@@ -803,6 +803,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         accrue();
 
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
+        require(positions[_nftIndex].liquidatedAt == 0, "liquidated");
         require(_getDebtAmount(_nftIndex) == 0, "position_not_repaid");
 
         positionOwner[_nftIndex] = address(0);
