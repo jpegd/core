@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "../../utils/NoContract.sol";
 import "../../interfaces/IController.sol";
-import "../../interfaces/IYVault.sol";
+import "../../interfaces/IMigrateYVaultLPFarming.sol";
 
 /// @title JPEG'd yVault
 /// @notice Allows users to deposit fungible assets into autocompounding strategy contracts (e.g. {StrategyPUSDConvex}).
@@ -26,9 +26,9 @@ contract YVault is ERC20, NoContract {
 
     ERC20 public immutable token;
     IController public controller;
-    
+
     address public farm;
-    
+
     Rate internal availableTokensRate;
 
 
@@ -86,9 +86,13 @@ contract YVault is ERC20, NoContract {
     }
 
     /// @notice Allows the owner to set the yVault LP farm
+    /// @dev Calls migrate on old farm, if any
     /// @param _farm The new farm
     function setFarmingPool(address _farm) external onlyOwner {
         require(_farm != address(0), "INVALID_FARMING_POOL");
+
+        if (farm != address(0)) IMigrateYVaultLPFarming(farm).migrate();
+
         farm = _farm;
     }
 
@@ -161,7 +165,7 @@ contract YVault is ERC20, NoContract {
         emit Withdrawal(msg.sender, backingTokens);
     }
 
-    /// @notice Allows anyone to withdraw JPEG to `farm` 
+    /// @notice Allows anyone to withdraw JPEG to `farm`
     function withdrawJPEG() external {
         require(farm != address(0), "NO_FARM");
         controller.withdrawJPEG(address(token), farm);
