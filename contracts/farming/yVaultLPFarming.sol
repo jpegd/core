@@ -49,7 +49,7 @@ contract YVaultLPFarming is NoContract {
         uint256 staked = totalStaked;
         //if blockNumber is greater than the pool's `lastRewardBlock` the pool's `accRewardPerShare` is outdated,
         //we need to calculate the up to date amount to return an accurate reward value
-        if (block.number > lastRewardBlock && staked > 0) {
+        if (block.number > lastRewardBlock && staked != 0) {
             uint256 currentBalance = isMigrating
                 ? jpeg.balanceOf(address(this))
                 : vault.balanceOfJPEG() + jpeg.balanceOf(address(this));
@@ -72,8 +72,8 @@ contract YVaultLPFarming is NoContract {
     /// @notice Allows users to deposit `_amount` of vault tokens. Non whitelisted contracts can't call this function
     /// @dev Emits a {Deposit} event
     /// @param _amount The amount of tokens to deposit
-    function deposit(uint256 _amount) external noContract() {
-        require(_amount > 0, "INVALID_AMOUNT");
+    function deposit(uint256 _amount) external noContract {
+        require(_amount != 0, "INVALID_AMOUNT");
         require(!isMigrating, "DEPOSITS_DISABLED");
 
         _update();
@@ -90,14 +90,16 @@ contract YVaultLPFarming is NoContract {
     /// @notice Allows users to withdraw `_amount` of vault tokens. Non whitelisted contracts can't call this function
     /// @dev Emits a {Withdraw} event
     /// @param _amount The amount of tokens to withdraw
-    function withdraw(uint256 _amount) external noContract() {
-        require(_amount > 0, "INVALID_AMOUNT");
+    function withdraw(uint256 _amount) external noContract {
+        require(_amount != 0, "INVALID_AMOUNT");
         require(balanceOf[msg.sender] >= _amount, "INSUFFICIENT_AMOUNT");
 
         _update();
         _withdrawReward(msg.sender);
 
-        balanceOf[msg.sender] -= _amount;
+        unchecked {
+            balanceOf[msg.sender] -= _amount;
+        }
         totalStaked -= _amount;
 
         vault.safeTransfer(msg.sender, _amount);
@@ -107,12 +109,12 @@ contract YVaultLPFarming is NoContract {
 
     /// @notice Allows users to claim rewards. Non whitelisted contracts can't call this function
     /// @dev Emits a {Claim} event
-    function claim() external noContract() {
+    function claim() external noContract {
         _update();
         _withdrawReward(msg.sender);
 
         uint256 rewards = userPendingRewards[msg.sender];
-        require(rewards > 0, "NO_REWARD");
+        require(rewards != 0, "NO_REWARD");
 
         userPendingRewards[msg.sender] = 0;
         //we are subtracting the claimed rewards from the previous to have a consistent value next time
@@ -153,12 +155,13 @@ contract YVaultLPFarming is NoContract {
     /// @dev Updates `account`'s claimable rewards by adding pending rewards
     /// @param account The account to update
     function _withdrawReward(address account) internal returns (uint256) {
+        uint256 reward = accRewardPerShare;
         uint256 pending = (balanceOf[account] *
-            (accRewardPerShare - userLastAccRewardPerShare[account])) / 1e36;
+            (reward - userLastAccRewardPerShare[account])) / 1e36;
 
-        if (pending > 0) userPendingRewards[account] += pending;
+        if (pending != 0) userPendingRewards[account] += pending;
 
-        userLastAccRewardPerShare[account] = accRewardPerShare;
+        userLastAccRewardPerShare[account] = reward;
 
         return pending;
     }

@@ -84,7 +84,7 @@ contract Controller is AccessControl {
         onlyRole(STRATEGIST_ROLE)
     {
         require(
-            approvedStrategies[_token][_strategy] == true,
+            approvedStrategies[_token][_strategy],
             "STRATEGY_NOT_APPROVED"
         );
 
@@ -148,7 +148,7 @@ contract Controller is AccessControl {
     /// @notice Allows a vault to withdraw strategy tokens from a strategy (usually done during withdrawals from vaults)
     /// @param _token The token to withdraw
     /// @param _amount The amount of tokens to withdraw
-    function withdraw(IERC20 _token, uint256 _amount) public {
+    function withdraw(IERC20 _token, uint256 _amount) external {
         require(msg.sender == vaults[_token], "NOT_VAULT");
         strategies[_token].withdraw(_amount);
     }

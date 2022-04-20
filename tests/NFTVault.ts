@@ -844,7 +844,7 @@ describe("NFTVault", () => {
       nftVault
         .connect(dao)
         .setCreditLimitRate({ numerator: 34, denominator: 100 })
-    ).to.revertedWith("credit_rate_exceeds_or_equals_liquidation_rate");
+    ).to.revertedWith("invalid_liquidation_rate");
     await nftVault
       .connect(dao)
       .setCreditLimitRate({ numerator: 31, denominator: 100 });
@@ -884,7 +884,7 @@ describe("NFTVault", () => {
       nftVault
         .connect(dao)
         .setLiquidationLimitRate({ numerator: 30, denominator: 100 })
-    ).revertedWith("credit_rate_exceeds_or_equals_liquidation_rate");
+    ).revertedWith("invalid_liquidation_rate");
     await nftVault
       .connect(dao)
       .setLiquidationLimitRate({ numerator: 34, denominator: 100 });

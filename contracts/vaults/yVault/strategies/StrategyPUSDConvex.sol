@@ -142,7 +142,7 @@ contract StrategyPUSDConvex is AccessControl {
             "INVALID_USDC_VAULT"
         );
 
-        for (uint256 i = 0; i < _strategyConfig.rewardTokens.length; i++) {
+        for (uint256 i; i < _strategyConfig.rewardTokens.length; ++i) {
             require(
                 address(_strategyConfig.rewardTokens[i]) != address(0),
                 "INVALID_REWARD_TOKEN"
@@ -179,7 +179,7 @@ contract StrategyPUSDConvex is AccessControl {
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         require(
-            _performanceFee.denominator > 0 &&
+            _performanceFee.denominator != 0 &&
                 _performanceFee.denominator >= _performanceFee.numerator,
             "INVALID_RATE"
         );
@@ -224,17 +224,17 @@ contract StrategyPUSDConvex is AccessControl {
     /// @return The amount of JPEG currently held by this contract and the amount of JPEG
     /// rewards available from Convex
     function balanceOfJPEG() external view returns (uint256) {
-        uint256 availableBalance = jpeg.balanceOf(address(this));
+        IERC20 _jpeg = jpeg;
+        uint256 availableBalance = _jpeg.balanceOf(address(this));
 
         IBaseRewardPool baseRewardPool = convexConfig.baseRewardPool;
         uint256 length = baseRewardPool.extraRewardsLength();
-        for (uint256 i = 0; i < length; i++) {
-            IBaseRewardPool extraReward = IBaseRewardPool(baseRewardPool.extraRewards(i));
-            if (address(jpeg) == extraReward.rewardToken()) {
-                availableBalance += extraReward.earned(address(this));
-                //we found jpeg, no need to continue the loop
-                break;
-            }
+        for (uint256 i; i < length; ++i) {
+            IBaseRewardPool extraReward = IBaseRewardPool(
+                baseRewardPool.extraRewards(i)
+            );
+            if (address(_jpeg) == extraReward.rewardToken())
+                return availableBalance + extraReward.earned(address(this));
         }
 
         return availableBalance;
@@ -276,11 +276,14 @@ contract StrategyPUSDConvex is AccessControl {
 
         uint256 balance = want.balanceOf(address(this));
         //if the contract doesn't have enough want, withdraw from Convex
-        if (balance < _amount)
-            convexConfig.baseRewardPool.withdrawAndUnwrap(
-                _amount - balance,
-                false
-            );
+        if (balance < _amount) {
+            unchecked {
+                convexConfig.baseRewardPool.withdrawAndUnwrap(
+                    _amount - balance,
+                    false
+                );
+            }
+        }
 
         want.safeTransfer(vault, _amount);
     }
@@ -305,8 +308,7 @@ contract StrategyPUSDConvex is AccessControl {
         convexConfig.baseRewardPool.getReward(_to, true);
         uint256 jpegBalance = jpeg.balanceOf(address(this));
 
-        if (jpegBalance > 0)
-            jpeg.safeTransfer(_to, jpegBalance);
+        if (jpegBalance != 0) jpeg.safeTransfer(_to, jpegBalance);
     }
 
     /// @notice Allows members of the `STRATEGIST_ROLE` to compound Convex rewards into Curve
@@ -319,10 +321,10 @@ contract StrategyPUSDConvex is AccessControl {
             DexConfig memory dex = dexConfig;
             IERC20[] memory rewardTokens = strategyConfig.rewardTokens;
             IERC20 _weth = weth;
-            for (uint256 i = 0; i < rewardTokens.length; i++) {
+            for (uint256 i; i < rewardTokens.length; ++i) {
                 uint256 balance = rewardTokens[i].balanceOf(address(this));
 
-                if (balance > 0)
+                if (balance != 0)
                     //minOut is not needed here, we already have it on the Curve deposit
                     _swapUniswapV2(
                         dex.uniswapV2,
@@ -334,7 +336,7 @@ contract StrategyPUSDConvex is AccessControl {
             }
 
             uint256 wethBalance = _weth.balanceOf(address(this));
-            require(wethBalance > 0, "NOOP");
+            require(wethBalance != 0, "NOOP");
 
             //handle sending jpeg here
 
@@ -362,8 +364,9 @@ contract StrategyPUSDConvex is AccessControl {
         uint256 fee = (usdcBalance * performanceFee.numerator) /
             performanceFee.denominator;
         usdc.safeTransfer(strategy.controller.feeAddress(), fee);
-        usdcBalance -= fee;
-
+        unchecked {
+            usdcBalance -= fee;
+        }
         uint256 pusdCurveBalance = curve.curve.balances(curve.pusdIndex);
         //USDC has 6 decimals while PUSD has 18. We need to convert the USDC
         //balance to 18 decimals to compare it with the PUSD balance

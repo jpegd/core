@@ -31,7 +31,6 @@ contract YVault is ERC20, NoContract {
 
     Rate internal availableTokensRate;
 
-
     /// @param _token The token managed by this vault
     /// @param _controller The JPEG'd strategies controller
     constructor(
@@ -72,7 +71,7 @@ contract YVault is ERC20, NoContract {
     /// @param _rate The new rate
     function setAvailableTokensRate(Rate memory _rate) public onlyOwner {
         require(
-            _rate.numerator > 0 && _rate.denominator >= _rate.numerator,
+            _rate.numerator != 0 && _rate.denominator >= _rate.numerator,
             "INVALID_RATE"
         );
         availableTokensRate = _rate;
@@ -107,8 +106,10 @@ contract YVault is ERC20, NoContract {
     /// @notice Deposits `token` into the underlying strategy
     function earn() external {
         uint256 _bal = available();
-        token.safeTransfer(address(controller), _bal);
-        controller.earn(address(token), _bal);
+        ERC20 _token = token;
+        IController _controller = controller;
+        _token.safeTransfer(address(_controller), _bal);
+        _controller.earn(address(_token), _bal);
     }
 
     /// @notice Allows users to deposit their entire `token` balance
@@ -118,20 +119,20 @@ contract YVault is ERC20, NoContract {
 
     /// @notice Allows users to deposit `token`. Contracts can't call this function
     /// @param _amount The amount to deposit
-    function deposit(uint256 _amount) public noContract() {
-        require(_amount > 0, "INVALID_AMOUNT");
+    function deposit(uint256 _amount) public noContract {
+        require(_amount != 0, "INVALID_AMOUNT");
         uint256 balanceBefore = balance();
         uint256 supply = totalSupply();
         uint256 shares;
         if (supply == 0) {
             shares = _amount;
         } else {
-            //balanceBefore can't be 0 if totalSupply is > 0
+            //balanceBefore can't be 0 if totalSupply is != 0
             shares = (_amount * supply) / balanceBefore;
         }
 
-        require(shares > 0, "ZERO_SHARES_MINTED");
-        
+        require(shares != 0, "ZERO_SHARES_MINTED");
+
         token.safeTransferFrom(msg.sender, address(this), _amount);
         _mint(msg.sender, shares);
 
@@ -145,30 +146,35 @@ contract YVault is ERC20, NoContract {
 
     /// @notice Allows users to withdraw tokens. Contracts can't call this function
     /// @param _shares The amount of shares to burn
-    function withdraw(uint256 _shares) public noContract() {
-        require(_shares > 0, "INVALID_AMOUNT");
+    function withdraw(uint256 _shares) public noContract {
+        require(_shares != 0, "INVALID_AMOUNT");
 
         uint256 supply = totalSupply();
-        require(supply > 0, "NO_TOKENS_DEPOSITED");
+        require(supply != 0, "NO_TOKENS_DEPOSITED");
 
         uint256 backingTokens = (balance() * _shares) / supply;
         _burn(msg.sender, _shares);
 
+        ERC20 _token = token;
         // Check balance
-        uint256 vaultBalance = token.balanceOf(address(this));
+        uint256 vaultBalance = _token.balanceOf(address(this));
         if (vaultBalance < backingTokens) {
-            uint256 toWithdraw = backingTokens - vaultBalance;
-            controller.withdraw(address(token), toWithdraw);
+            uint256 toWithdraw;
+            unchecked {
+                toWithdraw = backingTokens - vaultBalance;
+            }
+            controller.withdraw(address(_token), toWithdraw);
         }
 
-        token.safeTransfer(msg.sender, backingTokens);
+        _token.safeTransfer(msg.sender, backingTokens);
         emit Withdrawal(msg.sender, backingTokens);
     }
 
     /// @notice Allows anyone to withdraw JPEG to `farm`
     function withdrawJPEG() external {
-        require(farm != address(0), "NO_FARM");
-        controller.withdrawJPEG(address(token), farm);
+        address _farm = farm;
+        require(_farm != address(0), "NO_FARM");
+        controller.withdrawJPEG(address(token), _farm);
     }
 
     /// @return The underlying tokens per share

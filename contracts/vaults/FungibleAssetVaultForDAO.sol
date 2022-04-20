@@ -67,7 +67,7 @@ contract FungibleAssetVaultForDAO is
         address _collateralAsset,
         IStableCoin _stablecoin,
         IAggregatorV3Interface _oracle,
-        Rate memory _creditLimitRate
+        Rate calldata _creditLimitRate
     ) external initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
@@ -89,9 +89,12 @@ contract FungibleAssetVaultForDAO is
 
     /// @notice Allows members of the `DEFAULT_ADMIN_ROLE` to change the max outstanding debt to collateral ratio
     /// @param _creditLimitRate The new ratio
-    function setCreditLimitRate(Rate memory _creditLimitRate) public onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setCreditLimitRate(Rate calldata _creditLimitRate)
+        public
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         require(
-            _creditLimitRate.denominator > 0 &&
+            _creditLimitRate.denominator != 0 &&
                 //denominator can be equal to the numerator in some cases (stablecoins used as collateral)
                 _creditLimitRate.denominator >= _creditLimitRate.numerator,
             "invalid_rate"
@@ -102,18 +105,21 @@ contract FungibleAssetVaultForDAO is
     /// @dev Returns the USD price of one unit of collateral asset, using 18 decimals precision
     /// @return The USD price
     function _collateralPriceUsd() internal view returns (uint256) {
-        (,int256 answer,,uint256 timestamp,) = oracle.latestRoundData();
+        IAggregatorV3Interface aggregator = oracle;
+        (, int256 answer, , uint256 timestamp, ) = aggregator.latestRoundData();
 
         require(answer > 0, "invalid_oracle_answer");
-        require(timestamp > 0, "round_incomplete");
+        require(timestamp != 0, "round_incomplete");
 
-        uint8 decimals = oracle.decimals();
+        uint8 decimals = aggregator.decimals();
 
-        //check chainlink's precision and convert it to 18 decimals
-        return
-            decimals > 18
-                ? uint256(answer) / 10**(decimals - 18)
-                : uint256(answer) * 10**(18 - decimals);
+        unchecked {
+            //check chainlink's precision and convert it to 18 decimals
+            return
+                decimals > 18
+                    ? uint256(answer) / 10**(decimals - 18)
+                    : uint256(answer) * 10**(18 - decimals);
+        }
     }
 
     /// @dev Returns the USD value of `amount` units of collateral, using 18 decimals precision
@@ -140,14 +146,19 @@ contract FungibleAssetVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to deposit `amount` of collateral
     /// @dev Emits a {Deposit} event
     /// @param amount The amount of collateral to deposit
-    function deposit(uint256 amount) external payable onlyRole(WHITELISTED_ROLE) {
-        require(amount > 0, "invalid_amount");
+    function deposit(uint256 amount)
+        external
+        payable
+        onlyRole(WHITELISTED_ROLE)
+    {
+        require(amount != 0, "invalid_amount");
 
-        if (collateralAsset == ETH) {
+        address asset = collateralAsset;
+        if (asset == ETH) {
             require(msg.value == amount, "invalid_msg_value");
         } else {
             require(msg.value == 0, "non_zero_eth_value");
-            IERC20Upgradeable(collateralAsset).safeTransferFrom(
+            IERC20Upgradeable(asset).safeTransferFrom(
                 msg.sender,
                 address(this),
                 amount
@@ -162,8 +173,12 @@ contract FungibleAssetVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to borrow `amount` of PUSD against the deposited collateral
     /// @dev Emits a {Borrow} event
     /// @param amount The amount of PUSD to borrow
-    function borrow(uint256 amount) external onlyRole(WHITELISTED_ROLE) nonReentrant {
-        require(amount > 0, "invalid_amount");
+    function borrow(uint256 amount)
+        external
+        onlyRole(WHITELISTED_ROLE)
+        nonReentrant
+    {
+        require(amount != 0, "invalid_amount");
 
         uint256 creditLimit = getCreditLimit(collateralAmount);
         uint256 newDebtAmount = debtAmount + amount;
@@ -178,12 +193,18 @@ contract FungibleAssetVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to repay `amount` of debt using PUSD
     /// @dev Emits a {Repay} event
     /// @param amount The amount of debt to repay
-    function repay(uint256 amount) external onlyRole(WHITELISTED_ROLE) nonReentrant {
-        require(amount > 0, "invalid_amount");
+    function repay(uint256 amount)
+        external
+        onlyRole(WHITELISTED_ROLE)
+        nonReentrant
+    {
+        require(amount != 0, "invalid_amount");
 
         amount = amount > debtAmount ? debtAmount : amount;
 
-        debtAmount -= amount;
+        unchecked {
+            debtAmount -= amount;
+        }
         stablecoin.burnFrom(msg.sender, amount);
 
         emit Repay(msg.sender, amount);
@@ -192,19 +213,25 @@ contract FungibleAssetVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to withdraw `amount` of deposited collateral
     /// @dev Emits a {Withdraw} event
     /// @param amount The amount of collateral to withdraw
-    function withdraw(uint256 amount) external onlyRole(WHITELISTED_ROLE) nonReentrant {
-        require(amount > 0 && amount <= collateralAmount, "invalid_amount");
+    function withdraw(uint256 amount)
+        external
+        onlyRole(WHITELISTED_ROLE)
+        nonReentrant
+    {
+        uint256 collateral = collateralAmount;
+        require(amount != 0 && amount <= collateral, "invalid_amount");
+        
+        unchecked {
+            uint256 creditLimit = getCreditLimit(collateral - amount);
+            require(creditLimit >= debtAmount, "insufficient_credit");
+        }
 
-        uint256 creditLimit = getCreditLimit(collateralAmount - amount);
-        require(creditLimit >= debtAmount, "insufficient_credit");
-
-        collateralAmount -= amount;
+        collateralAmount = collateral - amount;
 
         if (collateralAsset == ETH) {
-            (bool sent,) = payable(msg.sender).call{value: amount}("");
+            (bool sent, ) = payable(msg.sender).call{value: amount}("");
             require(sent, "ETH_TRANSFER_FAILED");
-        }
-        else
+        } else
             IERC20Upgradeable(collateralAsset).safeTransfer(msg.sender, amount);
 
         emit Withdraw(msg.sender, amount);
