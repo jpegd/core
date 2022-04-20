@@ -214,6 +214,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         onlyRole(DAO_ROLE)
     {
         _validateRate(_debtInterestApr);
+
+        accrue();
+
         settings.debtInterestApr = _debtInterestApr;
     }
 
