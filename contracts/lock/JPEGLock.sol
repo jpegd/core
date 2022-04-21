@@ -37,7 +37,7 @@ contract JPEGLock is Ownable, ReentrancyGuard {
     /// The lock duration of already existing locked tokens won't change
     /// @param _newTime The new lock duration in seconds
     function setLockTime(uint256 _newTime) external onlyOwner {
-        require(_newTime > 0, "Invalid lock time");
+        require(_newTime != 0, "Invalid lock time");
         lockTime = _newTime;
     }
 
@@ -72,15 +72,16 @@ contract JPEGLock is Ownable, ReentrancyGuard {
     /// @dev Emits an {Unlock} event
     /// @param _nftIndex the NFT to unlock 
     function unlock(uint256 _nftIndex) external nonReentrant {
-        LockPosition memory position = positions[_nftIndex];
+        LockPosition storage position = positions[_nftIndex];
+        uint256 lockAmount = position.lockAmount;
         require(position.owner == msg.sender, "unauthorized");
         require(position.unlockAt <= block.timestamp, "locked");
 
         delete positions[_nftIndex];
 
-        jpeg.safeTransfer(msg.sender, position.lockAmount);
+        jpeg.safeTransfer(msg.sender, lockAmount);
 
-        emit Unlock(msg.sender, _nftIndex, position.lockAmount);
+        emit Unlock(msg.sender, _nftIndex, lockAmount);
     }
 
     /// @dev Prevent the owner from renouncing ownership. Having no owner would render this contract unusable

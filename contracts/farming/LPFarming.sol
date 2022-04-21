@@ -86,7 +86,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
     ) external onlyOwner {
         require(_startBlock >= block.number, "Invalid start block");
         require(_endBlock > _startBlock, "Invalid end block");
-        require(_rewardPerBlock > 0, "Invalid reward per block");
+        require(_rewardPerBlock != 0, "Invalid reward per block");
 
         //update all pools to ensure that they have all been updated up to the last epoch's `endBlock`
         _massUpdatePools();
@@ -100,13 +100,17 @@ contract LPFarming is ReentrancyGuard, NoContract {
         epoch.rewardPerBlock = _rewardPerBlock;
 
         if (remainingRewards > newRewards) {
-            jpeg.safeTransfer(msg.sender, remainingRewards - newRewards);
+            unchecked {
+                jpeg.safeTransfer(msg.sender, remainingRewards - newRewards);
+            }
         } else if (remainingRewards < newRewards) {
-            jpeg.safeTransferFrom(
-                msg.sender,
-                address(this),
-                newRewards - remainingRewards
-            );
+            unchecked {
+                jpeg.safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    newRewards - remainingRewards
+                );
+            }
         }
     }
 
@@ -187,11 +191,8 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @dev Emits a {Deposit} event
     /// @param _pid The id of the pool to deposit into
     /// @param _amount The amount of LP tokens to deposit
-    function deposit(uint256 _pid, uint256 _amount)
-        external
-        noContract()
-    {
-        require(_amount > 0, "invalid_amount");
+    function deposit(uint256 _pid, uint256 _amount) external noContract {
+        require(_amount != 0, "invalid_amount");
 
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
@@ -209,11 +210,8 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @dev Emits a {Withdraw} event
     /// @param _pid The id of the pool to withdraw from
     /// @param _amount The amount of LP tokens to withdraw
-    function withdraw(uint256 _pid, uint256 _amount)
-        external
-        noContract()
-    {
-        require(_amount > 0, "invalid_amount");
+    function withdraw(uint256 _pid, uint256 _amount) external noContract {
+        require(_amount != 0, "invalid_amount");
 
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
@@ -223,7 +221,10 @@ contract LPFarming is ReentrancyGuard, NoContract {
         _withdrawReward(_pid);
 
         pool.depositedAmount -= _amount;
-        user.amount -= _amount;
+        unchecked {
+            user.amount -= _amount;
+        }
+
         pool.lpToken.safeTransfer(address(msg.sender), _amount);
 
         emit Withdraw(msg.sender, _pid, _amount);
@@ -256,7 +257,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @dev Calls {_updatePool} for every pool
     function _massUpdatePools() internal {
         uint256 length = poolInfo.length;
-        for (uint256 pid = 0; pid < length; ++pid) {
+        for (uint256 pid; pid < length; ++pid) {
             _updatePool(pid);
         }
     }
@@ -292,14 +293,14 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @param _pid The pool to withdraw rewards from
     function _withdrawReward(uint256 _pid) internal returns (uint256) {
         UserInfo storage user = userInfo[_pid][msg.sender];
+        uint256 accRewardPerShare = poolInfo[_pid].accRewardPerShare;
         uint256 pending = (user.amount *
-            (poolInfo[_pid].accRewardPerShare - user.lastAccRewardPerShare)) /
-            1e36;
-        if (pending > 0) {
+            (accRewardPerShare - user.lastAccRewardPerShare)) / 1e36;
+        if (pending != 0) {
             userRewards[msg.sender] += pending;
         }
 
-        user.lastAccRewardPerShare = poolInfo[_pid].accRewardPerShare;
+        user.lastAccRewardPerShare = accRewardPerShare;
 
         return pending;
     }
@@ -307,12 +308,12 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @notice Allows users to claim rewards from the pool with id `_pid`. Non whitelisted contracts can't call this function
     /// @dev Emits a {Claim} event
     /// @param _pid The pool to claim rewards from
-    function claim(uint256 _pid) external nonReentrant noContract() {
+    function claim(uint256 _pid) external nonReentrant noContract {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
         uint256 rewards = userRewards[msg.sender];
-        require(rewards > 0, "no_reward");
+        require(rewards != 0, "no_reward");
 
         jpeg.safeTransfer(msg.sender, rewards);
         userRewards[msg.sender] = 0;
@@ -322,14 +323,15 @@ contract LPFarming is ReentrancyGuard, NoContract {
 
     /// @notice Allows users to claim rewards from all pools. Non whitelisted contracts can't call this function
     /// @dev Emits a {ClaimAll} event
-    function claimAll() external nonReentrant noContract() {
-        for (uint256 i = 0; i < poolInfo.length; i++) {
+    function claimAll() external nonReentrant noContract {
+        uint256 length = poolInfo.length;
+        for (uint256 i; i < length; ++i) {
             _updatePool(i);
             _withdrawReward(i);
         }
 
         uint256 rewards = userRewards[msg.sender];
-        require(rewards > 0, "no_reward");
+        require(rewards != 0, "no_reward");
 
         jpeg.safeTransfer(msg.sender, rewards);
         userRewards[msg.sender] = 0;

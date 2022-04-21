@@ -146,9 +146,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IAggregatorV3Interface _jpegAggregator,
         IAggregatorV3Interface _floorOracle,
         IAggregatorV3Interface _fallbackOracle,
-        NFTCategoryInitializer[] memory _typeInitializers,
+        NFTCategoryInitializer[] calldata _typeInitializers,
         IJPEGLock _jpegLocker,
-        VaultSettings memory _settings
+        VaultSettings calldata _settings
     ) external initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
@@ -181,10 +181,10 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         settings = _settings;
 
         //initializing the categories
-        for (uint256 i = 0; i < _typeInitializers.length; i++) {
+        for (uint256 i; i < _typeInitializers.length; ++i) {
             NFTCategoryInitializer memory initializer = _typeInitializers[i];
             nftTypeValueETH[initializer.hash] = initializer.valueETH;
-            for (uint256 j = 0; j < initializer.nfts.length; j++) {
+            for (uint256 j; j < initializer.nfts.length; j++) {
                 nftTypes[initializer.nfts[j]] = initializer.hash;
             }
         }
@@ -212,7 +212,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the DAO to change the interest APR on borrows
     /// @param _debtInterestApr The new interest rate
-    function setDebtInterestApr(Rate memory _debtInterestApr)
+    function setDebtInterestApr(Rate calldata _debtInterestApr)
         external
         onlyRole(DAO_ROLE)
     {
@@ -225,7 +225,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the DAO to change the amount of JPEG needed to increase the value of an NFT relative to the desired value
     /// @param _valueIncreaseLockRate The new rate
-    function setValueIncreaseLockRate(Rate memory _valueIncreaseLockRate)
+    function setValueIncreaseLockRate(Rate calldata _valueIncreaseLockRate)
         external
         onlyRole(DAO_ROLE)
     {
@@ -235,7 +235,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the DAO to change the max debt to collateral rate for a position
     /// @param _creditLimitRate The new rate
-    function setCreditLimitRate(Rate memory _creditLimitRate)
+    function setCreditLimitRate(Rate calldata _creditLimitRate)
         external
         onlyRole(DAO_ROLE)
     {
@@ -250,7 +250,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the DAO to change the minimum debt to collateral rate for a position to be market as liquidatable
     /// @param _liquidationLimitRate The new rate
-    function setLiquidationLimitRate(Rate memory _liquidationLimitRate)
+    function setLiquidationLimitRate(Rate calldata _liquidationLimitRate)
         external
         onlyRole(DAO_ROLE)
     {
@@ -281,7 +281,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows the DAO to bypass the floor oracle and override the NFT floor value
     /// @param _newFloor The new floor
     function overrideFloor(uint256 _newFloor) external onlyRole(DAO_ROLE) {
-        require(_newFloor > 0, "Invalid floor");
+        require(_newFloor != 0, "Invalid floor");
         nftTypeValueETH[bytes32(0)] = _newFloor;
         daoFloorOverride = true;
     }
@@ -293,7 +293,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the DAO to change the static borrow fee
     /// @param _organizationFeeRate The new fee rate
-    function setOrganizationFeeRate(Rate memory _organizationFeeRate)
+    function setOrganizationFeeRate(Rate calldata _organizationFeeRate)
         external
         onlyRole(DAO_ROLE)
     {
@@ -303,7 +303,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the DAO to change the cost of insurance
     /// @param _insurancePurchaseRate The new insurance fee rate
-    function setInsurancePurchaseRate(Rate memory _insurancePurchaseRate)
+    function setInsurancePurchaseRate(Rate calldata _insurancePurchaseRate)
         external
         onlyRole(DAO_ROLE)
     {
@@ -314,7 +314,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows the DAO to change the repurchase penalty rate in case of liquidation of an insured NFT
     /// @param _insuranceLiquidationPenaltyRate The new rate
     function setInsuranceLiquidationPenaltyRate(
-        Rate memory _insuranceLiquidationPenaltyRate
+        Rate calldata _insuranceLiquidationPenaltyRate
     ) external onlyRole(DAO_ROLE) {
         _validateRate(_insuranceLiquidationPenaltyRate);
         settings
@@ -330,7 +330,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         onlyRole(DAO_ROLE)
     {
         require(
-            _type == bytes32(0) || nftTypeValueETH[_type] > 0,
+            _type == bytes32(0) || nftTypeValueETH[_type] != 0,
             "invalid_nftType"
         );
         nftTypes[_nftIndex] = _type;
@@ -368,7 +368,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         validNFTIndex(_nftIndex)
     {
         uint256 pendingValue = pendingNFTValueETH[_nftIndex];
-        require(pendingValue > 0, "no_pending_value");
+        require(pendingValue != 0, "no_pending_value");
         uint256 toLockJpeg = (((pendingValue *
             _ethPriceUSD() *
             settings.creditLimitRate.numerator) /
@@ -397,15 +397,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         require(
             _liquidationLimitRate.numerator * _creditLimitRate.denominator >
                 _creditLimitRate.numerator * _liquidationLimitRate.denominator,
-            "credit_rate_exceeds_or_equals_liquidation_rate"
+            "invalid_liquidation_rate"
         );
     }
 
     /// @dev Validates a rate. The denominator must be greater than zero and greater than or equal to the numerator.
     /// @param rate The rate to validate
-    function _validateRate(Rate memory rate) internal pure {
+    function _validateRate(Rate calldata rate) internal pure {
         require(
-            rate.denominator > 0 && rate.denominator >= rate.numerator,
+            rate.denominator != 0 && rate.denominator >= rate.numerator,
             "invalid_rate"
         );
     }
@@ -462,17 +462,20 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        (,int256 answer,,uint256 timestamp,) = aggregator.latestRoundData();
+        (, int256 answer, , uint256 timestamp, ) = aggregator.latestRoundData();
 
         require(answer > 0, "invalid_oracle_answer");
-        require(timestamp > 0, "round_incomplete");
+        require(timestamp != 0, "round_incomplete");
 
         uint8 decimals = aggregator.decimals();
-        //converts the answer to have 18 decimals
-        return
-            decimals > 18
-                ? uint256(answer) / 10**(decimals - 18)
-                : uint256(answer) * 10**(18 - decimals);
+
+        unchecked {
+            //converts the answer to have 18 decimals
+            return
+                decimals > 18
+                    ? uint256(answer) / 10**(decimals - 18)
+                    : uint256(answer) * 10**(18 - decimals);
+        }
     }
 
     struct NFTInfo {
@@ -582,15 +585,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             return 0;
         }
 
-        if (totalDebtAmount == 0) {
+        uint256 totalDebt = totalDebtAmount;
+        if (totalDebt == 0) {
             return 0;
         }
 
         // Accrue interest
         return
-            (elapsedTime *
-                totalDebtAmount *
-                settings.debtInterestApr.numerator) /
+            (elapsedTime * totalDebt * settings.debtInterestApr.numerator) /
             settings.debtInterestApr.denominator /
             365 days;
     }
@@ -616,9 +618,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 creditLimit;
         uint256 debtPrincipal;
         uint256 debtInterest;
+        uint256 liquidatedAt;
         BorrowType borrowType;
         bool liquidatable;
-        uint256 liquidatedAt;
         address liquidator;
     }
 
@@ -633,12 +635,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     {
         address posOwner = positionOwner[_nftIndex];
 
-        uint256 debtPrincipal = positions[_nftIndex].debtPrincipal;
-        uint256 debtAmount = positions[_nftIndex].liquidatedAt > 0
-            ? positions[_nftIndex].debtAmountForRepurchase //calculate updated debt
+        Position storage position = positions[_nftIndex];
+        uint256 debtPrincipal = position.debtPrincipal;
+        uint256 liquidatedAt = position.liquidatedAt;
+        uint256 debtAmount = liquidatedAt != 0
+            ? position.debtAmountForRepurchase //calculate updated debt
             : _calculateDebt(
                 totalDebtAmount + _calculateAdditionalInterest(),
-                positions[_nftIndex].debtPortion,
+                position.debtPortion,
                 totalDebtPortion
             );
 
@@ -648,21 +652,23 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         //and the _calculateDebt call.
         if (debtPrincipal > debtAmount) debtAmount = debtPrincipal;
 
-        preview = PositionPreview({
-            owner: posOwner, //the owner of the position, `address(0)` if the position doesn't exists
-            nftIndex: _nftIndex, //the NFT used as collateral for the position
-            nftType: nftTypes[_nftIndex], //the type of the NFT
-            nftValueUSD: _getNFTValueUSD(_nftIndex), //the value in USD of the NFT
-            vaultSettings: settings, //the current vault's settings
-            creditLimit: _getCreditLimit(_nftIndex), //the NFT's credit limit
-            debtPrincipal: debtPrincipal, //the debt principal for the position, `0` if the position doesn't exists
-            debtInterest: debtAmount - debtPrincipal, //the interest of the position
-            borrowType: positions[_nftIndex].borrowType, //the insurance type of the position, `NOT_CONFIRMED` if it doesn't exist
-            liquidatable: positions[_nftIndex].liquidatedAt == 0 &&
-                debtAmount >= _getLiquidationLimit(_nftIndex), //if the position can be liquidated
-            liquidatedAt: positions[_nftIndex].liquidatedAt, //if the position has been liquidated and it had insurance, the timestamp at which the liquidation happened
-            liquidator: positions[_nftIndex].liquidator //if the position has been liquidated and it had insurance, the address of the liquidator
-        });
+        unchecked {
+            preview = PositionPreview({
+                owner: posOwner, //the owner of the position, `address(0)` if the position doesn't exists
+                nftIndex: _nftIndex, //the NFT used as collateral for the position
+                nftType: nftTypes[_nftIndex], //the type of the NFT
+                nftValueUSD: _getNFTValueUSD(_nftIndex), //the value in USD of the NFT
+                vaultSettings: settings, //the current vault's settings
+                creditLimit: _getCreditLimit(_nftIndex), //the NFT's credit limit
+                debtPrincipal: debtPrincipal, //the debt principal for the position, `0` if the position doesn't exists
+                debtInterest: debtAmount - debtPrincipal, //the interest of the position
+                borrowType: position.borrowType, //the insurance type of the position, `NOT_CONFIRMED` if it doesn't exist
+                liquidatable: liquidatedAt == 0 &&
+                    debtAmount >= _getLiquidationLimit(_nftIndex), //if the position can be liquidated
+                liquidatedAt: liquidatedAt, //if the position has been liquidated and it had insurance, the timestamp at which the liquidation happened
+                liquidator: position.liquidator //if the position has been liquidated and it had insurance, the address of the liquidator
+            });
+        }
     }
 
     /// @notice Allows users to open positions and borrow using an NFT
@@ -684,7 +690,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                 address(0) == positionOwner[_nftIndex],
             "unauthorized"
         );
-        require(_amount > 0, "invalid_amount");
+        require(_amount != 0, "invalid_amount");
         require(
             totalDebtAmount + _amount <= settings.borrowAmountCap,
             "debt_cap"
@@ -725,14 +731,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                 : BorrowType.NON_INSURANCE;
         }
 
+        uint256 debtPortion = totalDebtPortion;
         // update debt portion
-        if (totalDebtPortion == 0) {
+        if (debtPortion == 0) {
             totalDebtPortion = _amount;
             position.debtPortion = _amount;
         } else {
-            uint256 plusPortion = (totalDebtPortion * _amount) /
-                totalDebtAmount;
-            totalDebtPortion += plusPortion;
+            uint256 plusPortion = (debtPortion * _amount) / totalDebtAmount;
+            totalDebtPortion = debtPortion + plusPortion;
             position.debtPortion += plusPortion;
         }
         position.debtPrincipal += _amount;
@@ -762,13 +768,13 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         accrue();
 
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
-        require(_amount > 0, "invalid_amount");
+        require(_amount != 0, "invalid_amount");
 
         Position storage position = positions[_nftIndex];
         require(position.liquidatedAt == 0, "liquidated");
 
         uint256 debtAmount = _getDebtAmount(_nftIndex);
-        require(debtAmount > 0, "position_not_borrowed");
+        require(debtAmount != 0, "position_not_borrowed");
 
         uint256 debtPrincipal = position.debtPrincipal;
         uint256 debtInterest = debtAmount - debtPrincipal;
@@ -778,18 +784,22 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         // burn all payment, the interest is sent to the DAO using the {collect} function
         stablecoin.burnFrom(msg.sender, _amount);
 
-        uint256 paidPrincipal = _amount > debtInterest
-            ? _amount - debtInterest
-            : 0;
+        uint256 paidPrincipal;
 
+        unchecked {
+            paidPrincipal = _amount > debtInterest ? _amount - debtInterest : 0;
+        }
+
+        uint256 totalPortion = totalDebtPortion;
+        uint256 totalDebt = totalDebtAmount;
         uint256 minusPortion = paidPrincipal == debtPrincipal
             ? position.debtPortion
-            : (totalDebtPortion * _amount) / totalDebtAmount;
+            : (totalPortion * _amount) / totalDebt;
 
-        totalDebtPortion -= minusPortion;
+        totalDebtPortion = totalPortion - minusPortion;
         position.debtPortion -= minusPortion;
         position.debtPrincipal -= paidPrincipal;
-        totalDebtAmount -= _amount;
+        totalDebtAmount = totalDebt - _amount;
 
         emit Repaid(msg.sender, _nftIndex, _amount);
     }
@@ -886,7 +896,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     {
         Position memory position = positions[_nftIndex];
         require(msg.sender == positionOwner[_nftIndex], "unauthorized");
-        require(position.liquidatedAt > 0, "not_liquidated");
+        require(position.liquidatedAt != 0, "not_liquidated");
         require(
             position.borrowType == BorrowType.USE_INSURANCE,
             "non_insurance"
@@ -901,7 +911,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 penalty = (debtAmount *
             settings.insuranceLiquidationPenaltyRate.numerator) /
             settings.insuranceLiquidationPenaltyRate.denominator;
-        
+
         // transfer nft to user
         positionOwner[_nftIndex] = address(0);
         delete positions[_nftIndex];
@@ -931,7 +941,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         Position memory position = positions[_nftIndex];
         address owner = positionOwner[_nftIndex];
         require(address(0) != owner, "no_position");
-        require(position.liquidatedAt > 0, "not_liquidated");
+        require(position.liquidatedAt != 0, "not_liquidated");
         require(
             position.liquidatedAt + settings.insuraceRepurchaseTimeLimit <
                 block.timestamp,

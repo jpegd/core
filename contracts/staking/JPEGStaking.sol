@@ -29,7 +29,7 @@ contract JPEGStaking is ERC20VotesUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev Emits a {Stake} event
     /// @param _amount The amount of JPEG to stake
     function stake(uint256 _amount) external {
-        require(_amount > 0, "invalid_amount");
+        require(_amount != 0, "invalid_amount");
 
         jpeg.safeTransferFrom(msg.sender, address(this), _amount);
 
@@ -43,7 +43,7 @@ contract JPEGStaking is ERC20VotesUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _amount The amount of JPEG to unstake
     function unstake(uint256 _amount) external nonReentrant {
         require(
-            _amount > 0 && _amount <= balanceOf(msg.sender),
+            _amount != 0 && _amount <= balanceOf(msg.sender),
             "invalid_amount"
         );
 

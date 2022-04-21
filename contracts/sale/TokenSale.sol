@@ -140,7 +140,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
     /// @param _amount Amount of `saleToken` to sell
     function allocateTokensForSale(uint256 _amount) external onlyOwner {
         require(availableTokens == 0, "TOKENS_ALREADY_ALLOCATED");
-        require(_amount > 0, "INVALID_ALLOCATED_AMOUNT");
+        require(_amount != 0, "INVALID_ALLOCATED_AMOUNT");
 
         IERC20(saleToken).safeTransferFrom(msg.sender, address(this), _amount);
         availableTokens = _amount;
@@ -166,7 +166,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
     /// @dev Can only be called once
     function finalizeRaise() external onlyOwner {
         require(
-            saleSchedule.endTimestamp > 0 &&
+            saleSchedule.endTimestamp != 0 &&
                 block.timestamp >= saleSchedule.endTimestamp,
             "SALE_NOT_ENDED"
         );
@@ -174,14 +174,14 @@ contract TokenSale is Ownable, ReentrancyGuard {
 
         //Total dollar value raised
         uint256 value;
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
+        for (uint256 i; i < supportedTokens.length; ++i) {
             address token = supportedTokens[i];
             SupportedToken storage tokenData = supportedTokensData[token];
 
             (,int256 answer,,uint256 timestamp,) = IAggregatorV3Interface(tokenData.oracle)
                 .latestRoundData();
 
-            require(timestamp > 0, "ROUND_INCOMPLETE");
+            require(timestamp != 0, "ROUND_INCOMPLETE");
             require(answer > 0, "INVALID_ORACLE_ANSWER");
 
             uint256 convertedAnswer = answer.toUint256();
@@ -212,7 +212,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
     function transferToTreasury() external onlyOwner {
         require(withdrawalsEnabled, "WITHDRAWALS_NOT_ENABLED");
 
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
+        for (uint256 i; i < supportedTokens.length; ++i) {
             IERC20 token = IERC20(supportedTokens[i]);
             uint256 balance = token.balanceOf(address(this));
             token.safeTransfer(treasury, balance);
@@ -243,7 +243,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
         require(withdrawalsEnabled, "WITHDRAWALS_NOT_ENABLED");
 
         uint256 toSend = getUserClaimableTokens(msg.sender);
-        require(toSend > 0, "NO_TOKENS");
+        require(toSend != 0, "NO_TOKENS");
 
         delete userAccounts[msg.sender];
 
@@ -262,7 +262,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
     /// @return oracles Array containing all oracle addresses
     function getTokenOracles() external view returns (address[] memory oracles) {
         oracles = new address[](supportedTokens.length);
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
+        for (uint256 i; i < supportedTokens.length; ++i) {
             oracles[i] = supportedTokensData[supportedTokens[i]].oracle;
         }
     }
@@ -315,7 +315,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
                 block.timestamp < saleSchedule.endTimestamp,
             "DEPOSITS_NOT_ACCEPTED"
         );
-        require(_amount > 0, "INVALID_AMOUNT");
+        require(_amount != 0, "INVALID_AMOUNT");
         require(
             supportedTokensData[_token].oracle != address(0),
             "TOKEN_NOT_SUPPORTED"
