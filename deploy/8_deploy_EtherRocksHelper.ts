@@ -1,44 +1,34 @@
-import { ethers, upgrades, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-rocksHelper", "Deploys the EtherRocksHelper contract")
+	.setAction(async (_, { network, ethers, run, upgrades }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.etherRocks)
+			throw "No EtherRocks address in network's config file";
 
-  const Helper = await ethers.getContractFactory("EtherRocksHelper");
-  const helper = await upgrades.deployProxy(Helper, [deployData.etherRocks]);
-  await helper.deployed();
-  console.log("EtherRocksHelper deployed at: ", helper.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  const helperImplementation = await (
-    await upgrades.admin.getInstance()
-  ).getProxyImplementation(helper.address);
-  console.log(
-    "EtherRocksHelper implementation deployed at: ",
-    helperImplementation
-  );
+		const Helper = await ethers.getContractFactory("EtherRocksHelper");
+		const rocksHelper = await upgrades.deployProxy(Helper, [config.etherRocks]);
 
-  addresses.rocksHelper = helper.address;
-  addresses.rocksHelperImplementation = helperImplementation;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		console.log("EtherRocksHelper deployed at: ", rocksHelper.address);
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: helperImplementation,
-      constructorArguments: [],
-    });
-  }
-}
+		config.rocksHelper = rocksHelper.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		if (network.name != "hardhat") {
+			console.log("Verifying CryptoPunksHelper");
+
+			await run("verify:verify", {
+				address: rocksHelper.address,
+				constructorArguments: [config.etherRocks],
+			});
+		}
+
+		console.log("All done.");
+	});

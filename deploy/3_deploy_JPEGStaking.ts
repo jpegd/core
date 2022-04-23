@@ -1,41 +1,36 @@
-import { ethers, upgrades, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-jpegStaking", "Deploys the JPEGStaking contract")
+	.setAction(async (_, { network, ethers, run, upgrades }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.jpeg)
+			throw "No JPEG address in network's config file";
 
-  const JPEGStaking = await ethers.getContractFactory("JPEGStaking");
-  const sJpegd = await upgrades.deployProxy(JPEGStaking, [addresses.jpeg]);
-  await sJpegd.deployed();
-  console.log("JPEGStaking deployed at: ", sJpegd.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  const sJpegdImplementation = await (
-    await upgrades.admin.getInstance()
-  ).getProxyImplementation(sJpegd.address);
-  console.log("JPEGStaking implementation deployed at: ", sJpegdImplementation);
+		const JPEGStaking = await ethers.getContractFactory("JPEGStaking");
+		const sJPEG = await upgrades.deployProxy(JPEGStaking, [config.jpeg]);
 
-  addresses.sJpegd = sJpegd.address;
-  addresses.sJpegdImplementation = sJpegdImplementation;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		console.log("JPEGStaking deployed at: ", sJPEG.address);
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: sJpegdImplementation,
-      constructorArguments: [],
-    });
-  }
-}
+		config.sJPEG = sJPEG.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		if (network.name != "hardhat") {
+			console.log("Verifying JPEGStaking");
+
+			const sJPEGImplementation = await (await upgrades.admin.getInstance()).getProxyImplementation(sJPEG.address);
+
+			await run("verify:verify", {
+				address: sJPEGImplementation.address,
+				constructorArguments: [],
+			});
+		}
+
+		console.log("All done.");
+	});

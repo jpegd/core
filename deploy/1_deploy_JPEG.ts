@@ -1,59 +1,44 @@
-import { ethers, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { types, task } from "hardhat/config";
+import { parseUnits } from "@ethersproject/units";
+import { DEFAULT_ADMIN_ROLE, MINTER_ROLE } from "./constants";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-jpeg", "Deploys the JPEG token")
+	.addOptionalParam("totalSupply", "JPEG's total supply", 69420000000, types.int)
+	.setAction(async ({ totalSupply }, { network, ethers, run }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.dao)
+			throw "No DAO address in network's config file";
 
-  const JPEG = await ethers.getContractFactory("JPEG");
-  const jpeg = await JPEG.deploy(ethers.utils.parseUnits("69420000000"));
-  await jpeg.deployed();
-  console.log("JPEG deployed at: ", jpeg.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  addresses.jpeg = jpeg.address;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		const JPEG = await ethers.getContractFactory("JPEG");
+		const jpeg = await JPEG.deploy(parseUnits(totalSupply.toString()));
 
-  await (
-    await jpeg.grantRole(
-      "0x0000000000000000000000000000000000000000000000000000000000000000",
-      deployData.dao
-    )
-  ).wait();
+		console.log("JPEG deployed at: ", jpeg.address);
 
-  await (
-    await jpeg.grantRole(
-      "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
-      deployData.dao
-    )
-  ).wait();
+		config.jpeg = jpeg.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
-  await (
-    await jpeg.revokeRole(
-      "0x0000000000000000000000000000000000000000000000000000000000000000",
-      deployer.address
-    )
-  ).wait();
-  await (
-    await jpeg.transfer(deployData.dao, ethers.utils.parseUnits("69420000000"))
-  ).wait();
+		console.log("Configuring JPEG");
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: jpeg.address,
-      constructorArguments: [ethers.utils.parseUnits("69420000000")],
-    });
-  }
-}
+		await (await jpeg.grantRole(DEFAULT_ADMIN_ROLE, config.dao)).wait();
+		await (await jpeg.grantRole(MINTER_ROLE, config.dao)).wait();
+		await (await jpeg.revokeRole(DEFAULT_ADMIN_ROLE, deployer.address)).wait();
+		await (await jpeg.transfer(config.dao, parseUnits(totalSupply.toString()))).wait();
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		if (network.name != "hardhat") {
+			console.log("Verifying JPEG");
+			
+			await run("verify:verify", {
+				address: jpeg.address,
+				constructorArguments: [parseUnits(totalSupply.toString())]
+			});
+		}
+
+		console.log("All done.");
+	});
