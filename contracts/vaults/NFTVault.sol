@@ -10,6 +10,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
 import "../interfaces/IJPEGLock.sol";
+import "../interfaces/IJPEGCardsCigStaking.sol";
 
 /// @title NFT lending vault
 /// @notice This contracts allows users to borrow PUSD using NFTs as collateral.
@@ -63,6 +64,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         Rate debtInterestApr;
         Rate creditLimitRate;
         Rate liquidationLimitRate;
+        Rate cigStakedCreditLimitRate;
+        Rate cigStakedLiquidationLimitRate;
         Rate valueIncreaseLockRate;
         Rate organizationFeeRate;
         Rate insurancePurchaseRate;
@@ -87,6 +90,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     IAggregatorV3Interface public fallbackOracle;
     /// @notice JPEGLocker, used by this contract to lock JPEG and increase the value of an NFT
     IJPEGLock public jpegLocker;
+    /// @notice JPEGCardsCigStaking, cig stakers get an higher credit limit rate and liquidation limit rate.
+    /// Immediately reverts to normal rates if the cig is unstaked.
+    IJPEGCardsCigStaking public cigStaking;
     IERC721Upgradeable public nftContract;
 
     /// @notice If true, the floor price won't be fetched using the Chainlink oracle but
@@ -134,7 +140,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _ethAggregator Chainlink ETH/USD price feed address
     /// @param _jpegAggregator Chainlink JPEG/USD price feed address
     /// @param _floorOracle Chainlink floor oracle address
-    /// @param _fallbackOracle Chainlink fallback floor oracle address
     /// @param _typeInitializers Used to initialize NFT categories with their value and NFT indexes.
     /// Floor NFT shouldn't be initialized this way
     /// @param _jpegLocker JPEGLock address
@@ -145,9 +150,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IAggregatorV3Interface _ethAggregator,
         IAggregatorV3Interface _jpegAggregator,
         IAggregatorV3Interface _floorOracle,
-        IAggregatorV3Interface _fallbackOracle,
         NFTCategoryInitializer[] calldata _typeInitializers,
         IJPEGLock _jpegLocker,
+        IJPEGCardsCigStaking _cigStaking,
         VaultSettings calldata _settings
     ) external initializer {
         __AccessControl_init();
@@ -160,14 +165,41 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _validateRate(_settings.debtInterestApr);
         _validateRate(_settings.creditLimitRate);
         _validateRate(_settings.liquidationLimitRate);
+        _validateRate(_settings.cigStakedCreditLimitRate);
+        _validateRate(_settings.cigStakedLiquidationLimitRate);
         _validateRate(_settings.valueIncreaseLockRate);
         _validateRate(_settings.organizationFeeRate);
         _validateRate(_settings.insurancePurchaseRate);
         _validateRate(_settings.insuranceLiquidationPenaltyRate);
 
-        _validateCreditLimitAndLiquidationRate(
-            _settings.creditLimitRate,
-            _settings.liquidationLimitRate
+        require(
+            _greaterThan(
+                _settings.liquidationLimitRate,
+                _settings.creditLimitRate
+            ),
+            "invalid_liquidation_limit"
+        );
+        require(
+            _greaterThan(
+                _settings.cigStakedLiquidationLimitRate,
+                _settings.cigStakedCreditLimitRate
+            ),
+            "invalid_cig_liquidation_limit"
+        );
+
+        require(
+            _greaterThan(
+                _settings.cigStakedCreditLimitRate,
+                _settings.creditLimitRate
+            ),
+            "invalid_cig_credit_limit"
+        );
+        require(
+            _greaterThan(
+                _settings.cigStakedLiquidationLimitRate,
+                _settings.liquidationLimitRate
+            ),
+            "invalid_cig_liquidation_limit"
         );
 
         stablecoin = _stablecoin;
@@ -175,7 +207,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         ethAggregator = _ethAggregator;
         jpegAggregator = _jpegAggregator;
         floorOracle = _floorOracle;
-        fallbackOracle = _fallbackOracle;
+        cigStaking = _cigStaking;
         nftContract = _nftContract;
 
         settings = _settings;
@@ -240,9 +272,13 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         onlyRole(DAO_ROLE)
     {
         _validateRate(_creditLimitRate);
-        _validateCreditLimitAndLiquidationRate(
-            _creditLimitRate,
-            settings.liquidationLimitRate
+        require(
+            _greaterThan(settings.liquidationLimitRate, _creditLimitRate),
+            "invalid_credit_limit"
+        );
+        require(
+            _greaterThan(settings.cigStakedCreditLimitRate, _creditLimitRate),
+            "invalid_credit_limit"
         );
 
         settings.creditLimitRate = _creditLimitRate;
@@ -255,12 +291,76 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         onlyRole(DAO_ROLE)
     {
         _validateRate(_liquidationLimitRate);
-        _validateCreditLimitAndLiquidationRate(
-            settings.creditLimitRate,
-            _liquidationLimitRate
+        require(
+            _greaterThan(_liquidationLimitRate, settings.creditLimitRate),
+            "invalid_liquidation_limit"
+        );
+        require(
+            _greaterThan(
+                settings.cigStakedLiquidationLimitRate,
+                _liquidationLimitRate
+            ),
+            "invalid_liquidation_limit"
         );
 
         settings.liquidationLimitRate = _liquidationLimitRate;
+    }
+
+    /// @notice Allows the DAO to change the minimum debt to collateral rate for a position staking a cig to be market as liquidatable
+    /// @param _cigLiquidationLimitRate The new rate
+    function setStakedCigLiquidationLimitRate(
+        Rate calldata _cigLiquidationLimitRate
+    ) external onlyRole(DAO_ROLE) {
+        _validateRate(_cigLiquidationLimitRate);
+        require(
+            _greaterThan(
+                _cigLiquidationLimitRate,
+                settings.cigStakedCreditLimitRate
+            ),
+            "invalid_cig_liquidation_limit"
+        );
+        require(
+            _greaterThan(
+                _cigLiquidationLimitRate,
+                settings.liquidationLimitRate
+            ),
+            "invalid_cig_liquidation_limit"
+        );
+
+        settings.cigStakedLiquidationLimitRate = _cigLiquidationLimitRate;
+    }
+
+    /// @notice Allows the DAO to change the max debt to collateral rate for a position staking a cig
+    /// @param _cigCreditLimitRate The new rate
+    function setStakedCigCreditLimitRate(Rate calldata _cigCreditLimitRate)
+        external
+        onlyRole(DAO_ROLE)
+    {
+        _validateRate(_cigCreditLimitRate);
+        require(
+            _greaterThan(
+                settings.cigStakedLiquidationLimitRate,
+                _cigCreditLimitRate
+            ),
+            "invalid_cig_credit_limit"
+        );
+        require(
+            _greaterThan(_cigCreditLimitRate, settings.creditLimitRate),
+            "invalid_cig_credit_limit"
+        );
+
+        settings.cigStakedCreditLimitRate = _cigCreditLimitRate;
+    }
+
+    /// @notice Allows the DAO to change fallback oracle
+    /// @param _fallback new fallback address
+    function setFallbackOracle(IAggregatorV3Interface _fallback)
+        external
+        onlyRole(DAO_ROLE)
+    {
+        require(address(_fallback) != address(0), "invalid_address");
+
+        fallbackOracle = _fallback;
     }
 
     /// @notice Allows the DAO to toggle the fallback oracle
@@ -269,6 +369,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         onlyRole(DAO_ROLE)
     {
+        require(address(fallbackOracle) != address(0), "fallback_not_set");
         useFallbackOracle = _useFallback;
     }
 
@@ -386,19 +487,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         pendingNFTValueETH[_nftIndex] = 0;
     }
 
-    /// @dev Validates the credit limit rate and the liquidation limit rate.
-    /// The credit limit rate must be less than the liquidation rate
-    /// @param _creditLimitRate The credit limit rate to validate
-    /// @param _liquidationLimitRate The liquidation limit rate
-    function _validateCreditLimitAndLiquidationRate(
-        Rate memory _creditLimitRate,
-        Rate memory _liquidationLimitRate
-    ) internal pure {
-        require(
-            _liquidationLimitRate.numerator * _creditLimitRate.denominator >
-                _creditLimitRate.numerator * _liquidationLimitRate.denominator,
-            "invalid_liquidation_rate"
-        );
+    /// @dev Checks if `r1` is greater than `r2`.
+    function _greaterThan(Rate memory _r1, Rate memory _r2)
+        internal
+        pure
+        returns (bool)
+    {
+        return
+            _r1.numerator * _r2.denominator > _r2.numerator * _r1.denominator;
     }
 
     /// @dev Validates a rate. The denominator must be greater than zero and greater than or equal to the numerator.
@@ -506,28 +602,38 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev Returns the credit limit of an NFT
     /// @param _nftIndex The NFT to return credit limit of
     /// @return The NFT credit limit
-    function _getCreditLimit(uint256 _nftIndex)
+    function _getCreditLimit(address user, uint256 _nftIndex)
         internal
         view
         returns (uint256)
     {
-        uint256 asset_value = _getNFTValueUSD(_nftIndex);
+        uint256 value = _getNFTValueUSD(_nftIndex);
+        if (cigStaking.isUserStaking(user)) {
+            return
+                (value * settings.cigStakedCreditLimitRate.numerator) /
+                settings.cigStakedCreditLimitRate.denominator;
+        }
         return
-            (asset_value * settings.creditLimitRate.numerator) /
+            (value * settings.creditLimitRate.numerator) /
             settings.creditLimitRate.denominator;
     }
 
     /// @dev Returns the minimum amount of debt necessary to liquidate an NFT
     /// @param _nftIndex The index of the NFT
     /// @return The minimum amount of debt to liquidate the NFT
-    function _getLiquidationLimit(uint256 _nftIndex)
+    function _getLiquidationLimit(address user, uint256 _nftIndex)
         internal
         view
         returns (uint256)
     {
-        uint256 asset_value = _getNFTValueUSD(_nftIndex);
+        uint256 value = _getNFTValueUSD(_nftIndex);
+        if (cigStaking.isUserStaking(user)) {
+            return
+                (value * settings.cigStakedLiquidationLimitRate.numerator) /
+                settings.cigStakedLiquidationLimitRate.denominator;
+        }
         return
-            (asset_value * settings.liquidationLimitRate.numerator) /
+            (value * settings.liquidationLimitRate.numerator) /
             settings.liquidationLimitRate.denominator;
     }
 
@@ -659,12 +765,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                 nftType: nftTypes[_nftIndex], //the type of the NFT
                 nftValueUSD: _getNFTValueUSD(_nftIndex), //the value in USD of the NFT
                 vaultSettings: settings, //the current vault's settings
-                creditLimit: _getCreditLimit(_nftIndex), //the NFT's credit limit
+                creditLimit: _getCreditLimit(posOwner, _nftIndex), //the NFT's credit limit
                 debtPrincipal: debtPrincipal, //the debt principal for the position, `0` if the position doesn't exists
                 debtInterest: debtAmount - debtPrincipal, //the interest of the position
                 borrowType: position.borrowType, //the insurance type of the position, `NOT_CONFIRMED` if it doesn't exist
                 liquidatable: liquidatedAt == 0 &&
-                    debtAmount >= _getLiquidationLimit(_nftIndex), //if the position can be liquidated
+                    debtAmount >= _getLiquidationLimit(posOwner, _nftIndex), //if the position can be liquidated
                 liquidatedAt: liquidatedAt, //if the position has been liquidated and it had insurance, the timestamp at which the liquidation happened
                 liquidator: position.liquidator //if the position has been liquidated and it had insurance, the address of the liquidator
             });
@@ -707,7 +813,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             "invalid_insurance_mode"
         );
 
-        uint256 creditLimit = _getCreditLimit(_nftIndex);
+        uint256 creditLimit = _getCreditLimit(msg.sender, _nftIndex);
         uint256 debtAmount = _getDebtAmount(_nftIndex);
         require(debtAmount + _amount <= creditLimit, "insufficient_credit");
 
@@ -856,7 +962,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         uint256 debtAmount = _getDebtAmount(_nftIndex);
         require(
-            debtAmount >= _getLiquidationLimit(_nftIndex),
+            debtAmount >= _getLiquidationLimit(posOwner, _nftIndex),
             "position_not_liquidatable"
         );
 

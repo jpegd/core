@@ -1,49 +1,51 @@
-import { ethers, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-tokenSale", "Deploys the TokenSale contract")
+	.setAction(async (_, { network, ethers, run }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.weth)
+			throw "No WETH address in network's config file";
+		if (!config.usdc)
+			throw "No USDC address in network's config file";
+		if (!config.ethOracle)
+			throw "No ETHOracle address in network's config file";
+		if (!config.usdcOracle)
+			throw "No USDCOracle address in network's config file";
+		if (!config.dao)
+			throw "No DAO address in network's config file";
+		if (!config.jpeg)
+			throw "No JPEG address in network's config file";
 
-  const TokenSale = await ethers.getContractFactory("TokenSale");
-  const sale = await TokenSale.deploy(
-    deployData.weth,
-    deployData.usdc,
-    deployData.ethAggregator,
-    deployData.usdcAggregator,
-    addresses.jpeg,
-    deployData.dao
-  );
-  await sale.deployed();
-  console.log("TokenSale deployed at: ", sale.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  addresses.tokenSale = sale.address;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		const TokenSale = await ethers.getContractFactory("TokenSale");
+		const tokenSale = await TokenSale.deploy(config.weth, config.usdc, config.ethOracle, config.usdcOracle, config.jpeg, config.dao);
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: sale.address,
-      constructorArguments: [
-        deployData.weth,
-        deployData.usdc,
-        deployData.ethAggregator,
-        deployData.usdcAggregator,
-        addresses.jpeg,
-        deployData.dao,
-      ],
-    });
-  }
-}
+		console.log("TokenSale deployed at: ", tokenSale.address);
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		config.tokenSale = tokenSale.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
+
+		if (network.name != "hardhat") {
+			console.log("Verifying TokenSale");
+
+			await run("verify:verify", {
+				address: tokenSale.address,
+				constructorArguments: [
+					config.weth,
+					config.usdc,
+					config.ethOracle,
+					config.usdcOracle,
+					config.jpeg,
+					config.dao
+				]
+			});
+		}
+
+		console.log("All done.");
+	});

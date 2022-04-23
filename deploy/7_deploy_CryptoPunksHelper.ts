@@ -1,44 +1,34 @@
-import { ethers, upgrades, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-punksHelper", "Deploys the CryptoPunksHelper contract")
+	.setAction(async (_, { network, ethers, run, upgrades }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.cryptoPunks)
+			throw "No CryptoPunks address in network's config file";
 
-  const Helper = await ethers.getContractFactory("CryptoPunksHelper");
-  const helper = await upgrades.deployProxy(Helper, [deployData.cryptoPunk]);
-  await helper.deployed();
-  console.log("CryptoPunksHelper deployed at: ", helper.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  const helperImplementation = await (
-    await upgrades.admin.getInstance()
-  ).getProxyImplementation(helper.address);
-  console.log(
-    "CryptoPunksHelper implementation deployed at: ",
-    helperImplementation
-  );
+		const Helper = await ethers.getContractFactory("CryptoPunksHelper");
+		const punksHelper = await upgrades.deployProxy(Helper, [config.cryptoPunks]);
 
-  addresses.punksHelper = helper.address;
-  addresses.punksHelperImplementation = helperImplementation;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		console.log("CryptoPunksHelper deployed at: ", punksHelper.address);
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: helperImplementation,
-      constructorArguments: [],
-    });
-  }
-}
+		config.punksHelper = punksHelper.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		if (network.name != "hardhat") {
+			console.log("Verifying CryptoPunksHelper");
+
+			await run("verify:verify", {
+				address: punksHelper.address,
+				constructorArguments: [config.cryptoPunks],
+			});
+		}
+
+		console.log("All done.");
+	});

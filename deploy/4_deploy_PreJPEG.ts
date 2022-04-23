@@ -1,58 +1,43 @@
-import { ethers, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
+import { DEFAULT_ADMIN_ROLE, VESTING_CONTROLLER_ROLE } from "./constants";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-preJPEG", "Deploys the PreJPEG contract")
+	.setAction(async (_, { network, ethers, run }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.dao)
+			throw "No dao address in network's config file";
+		if (!config.jpeg)
+			throw "No JPEG address in network's config file";
 
-  const PreJPEG = await ethers.getContractFactory("PreJPEG");
-  const preJpeg = await PreJPEG.deploy(addresses.jpeg);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  await preJpeg.deployed();
+		const PreJPEG = await ethers.getContractFactory("PreJPEG");
+		const preJPEG = await PreJPEG.deploy(config.jpeg);
 
-  console.log("PreJPEG deployed at: ", preJpeg.address);
+		console.log("JPEGStaking deployed at: ", preJPEG.address);
 
-  addresses.preJpeg = preJpeg.address;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		config.preJPEG = preJPEG.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
-  await (
-    await preJpeg.grantRole(
-      "0xc23e4cf9f9c5137c948ad4a95211794895d43271639a97b001bd23951d54c84a",
-      deployData.dao
-    )
-  ).wait(); // vesting_controller_role
+		console.log("Configuring PreJPEG");
 
-  await (
-    await preJpeg.grantRole(
-      "0x0000000000000000000000000000000000000000000000000000000000000000",
-      deployData.dao
-    )
-  ).wait(); // admin_role
+		await (await preJPEG.grantRole(VESTING_CONTROLLER_ROLE, config.dao)).wait();
+		await (await preJPEG.grantRole(DEFAULT_ADMIN_ROLE, config.dao)).wait();
+		await (await preJPEG.revokeRole(DEFAULT_ADMIN_ROLE, deployer.address)).wait();
 
-  await (
-    await preJpeg.revokeRole(
-      "0x0000000000000000000000000000000000000000000000000000000000000000",
-      deployer.address
-    )
-  ).wait(); // admin_role
+		if (network.name != "hardhat") {
+			console.log("Verifying PreJPEG");
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: preJpeg.address,
-      constructorArguments: [addresses.jpeg],
-    });
-  }
-}
+			await run("verify:verify", {
+				address: preJPEG.address,
+				constructorArguments: [config.jpeg],
+			});
+		}
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		console.log("All done.");
+	});

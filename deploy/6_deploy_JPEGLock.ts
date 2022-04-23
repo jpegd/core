@@ -1,40 +1,34 @@
-import { ethers, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-jpegLock", "Deploys the JPEGLock contract")
+	.setAction(async (_, { network, ethers, run }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.jpeg)
+			throw "No JPEG address in network's config file";
 
-  const JPEGLock = await ethers.getContractFactory("JPEGLock");
-  const punksJpegLock = await JPEGLock.deploy(addresses.jpeg);
-  await punksJpegLock.deployed();
-  console.log("Punks JPEGLock deployed at: ", punksJpegLock.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  const rocksJpegLock = await JPEGLock.deploy(addresses.jpeg);
-  await rocksJpegLock.deployed();
-  console.log("Rocks JPEGLock deployed at: ", rocksJpegLock.address);
+		const JPEGLock = await ethers.getContractFactory("JPEGLock");
+		const jpegLock = await JPEGLock.deploy(config.jpeg);
 
-  addresses.punksJpegLock = punksJpegLock.address;
-  addresses.rocksJpegLock = rocksJpegLock.address;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		console.log("JPEGLock deployed at: ", jpegLock.address);
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: addresses.jpegLock,
-      constructorArguments: [addresses.jpeg],
-    });
-  }
-}
+		config.jpegLock = jpegLock.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		if (network.name != "hardhat") {
+			console.log("Verifying PreJPEG");
+
+			await run("verify:verify", {
+				address: jpegLock.address,
+				constructorArguments: [config.jpeg],
+			});
+		}
+
+		console.log("All done.");
+	});

@@ -1,35 +1,40 @@
-import { ethers, run } from "hardhat";
 import fs from "fs";
+import path from "path";
+import { task } from "hardhat/config";
+import { DEFAULT_ADMIN_ROLE } from "./constants";
 
-const addresses = require("./addresses.json");
-const { deployData } = require("./utils");
+task("deploy-stablecoin", "Deploys the Stablecoin contract")
+	.setAction(async (_, { network, ethers, run }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("deployer: ", deployer.address);
+		if (!config.dao)
+			throw "No dao address in network's config file";
 
-  const StableCoin = await ethers.getContractFactory("StableCoin");
-  const stablecoin = await StableCoin.deploy();
-  await stablecoin.deployed();
-  console.log("StableCoin deployed at: ", stablecoin.address);
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
 
-  addresses.stablecoin = stablecoin.address;
-  fs.writeFileSync(
-    "./deploy/addresses.json",
-    JSON.stringify(addresses, null, 2)
-  );
+		const StableCoin = await ethers.getContractFactory("StableCoin");
+		const pusd = await StableCoin.deploy();
 
-  if (deployData.verify) {
-    await run("verify:verify", {
-      address: addresses.stablecoin,
-      constructorArguments: [],
-    });
-  }
-}
+		console.log("Stablecoin deployed at: ", pusd.address);
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+		config.pusd = pusd.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
+		
+		console.log("Configuring Stablecoing");
+
+		await (await pusd.grantRole(DEFAULT_ADMIN_ROLE, config.dao)).wait();
+		await (await pusd.revokeRole(DEFAULT_ADMIN_ROLE, deployer.address)).wait();
+
+		if (network.name != "hardhat") {
+			console.log("Verifying PreJPEG");
+
+			await run("verify:verify", {
+				address: pusd.address,
+				constructorArguments: [],
+			});
+		}
+
+		console.log("All done.");
+	});
