@@ -123,7 +123,6 @@ describe("NFTVault", () => {
         [apeHash, units(2000), apes],
         [alienHash, units(4000), aliens],
       ],
-      locker.address,
       cigStaking.address,
       [
         [2, 100], //debtInterestApr
@@ -658,7 +657,17 @@ describe("NFTVault", () => {
     expect(await nftVault.totalPositions()).to.equal(0);
   });
 
+  it("should allow the DAO to set JPEG lock", async () => {
+    await expect(nftVault.connect(dao).setJPEGLocker(ZERO_ADDRESS)).to.be.revertedWith("invalid_address");
+
+    await nftVault.connect(dao).setJPEGLocker(locker.address);
+  });
+
   it("should allow the DAO to change JPEG lock time", async () => {
+    await expect(nftVault.connect(dao).setJPEGLockTime(10)).to.be.revertedWith("no_jpeg_locker");
+
+    await nftVault.connect(dao).setJPEGLocker(locker.address);
+
     await nftVault.connect(dao).setJPEGLockTime(10);
     expect(await locker.lockTime()).to.equal(10);
   });
@@ -756,6 +765,8 @@ describe("NFTVault", () => {
   });
 
   it("get punk + increase debt limit to 50000ETH + open position + borrow 6000ETH", async () => {
+    await nftVault.connect(dao).setJPEGLocker(locker.address);
+
     const index = 7000;
 
     await erc721.mint(user.address, index);

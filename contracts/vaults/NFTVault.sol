@@ -142,7 +142,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _floorOracle Chainlink floor oracle address
     /// @param _typeInitializers Used to initialize NFT categories with their value and NFT indexes.
     /// Floor NFT shouldn't be initialized this way
-    /// @param _jpegLocker JPEGLock address
     /// @param _settings Initial settings used by the contract
     function initialize(
         IStableCoin _stablecoin,
@@ -151,7 +150,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IAggregatorV3Interface _jpegAggregator,
         IAggregatorV3Interface _floorOracle,
         NFTCategoryInitializer[] calldata _typeInitializers,
-        IJPEGLock _jpegLocker,
         IJPEGCardsCigStaking _cigStaking,
         VaultSettings calldata _settings
     ) external initializer {
@@ -203,7 +201,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         );
 
         stablecoin = _stablecoin;
-        jpegLocker = _jpegLocker;
         ethAggregator = _ethAggregator;
         jpegAggregator = _jpegAggregator;
         floorOracle = _floorOracle;
@@ -373,9 +370,17 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         useFallbackOracle = _useFallback;
     }
 
+    /// @notice Allows the DAO to set jpeg locker
+    /// @param _jpegLocker The jpeg locker address
+    function setJPEGLocker(IJPEGLock _jpegLocker) external onlyRole(DAO_ROLE) {
+        require(address(_jpegLocker) != address(0), "invalid_address");
+        jpegLocker = _jpegLocker;
+    }
+
     /// @notice Allows the DAO to change the amount of time JPEG tokens need to be locked to change the value of an NFT
     /// @param _newLockTime The amount new lock time amount
     function setJPEGLockTime(uint256 _newLockTime) external onlyRole(DAO_ROLE) {
+        require(address(jpegLocker) != address(0), "no_jpeg_locker");
         jpegLocker.setLockTime(_newLockTime);
     }
 
@@ -456,6 +461,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         validNFTIndex(_nftIndex)
         onlyRole(DAO_ROLE)
     {
+        require(address(jpegLocker) != address(0), "no_jpeg_locker");
+        
         pendingNFTValueETH[_nftIndex] = _amountETH;
     }
 
@@ -468,6 +475,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         validNFTIndex(_nftIndex)
     {
+        require(address(jpegLocker) != address(0), "no_jpeg_locker");
+
         uint256 pendingValue = pendingNFTValueETH[_nftIndex];
         require(pendingValue != 0, "no_pending_value");
         uint256 toLockJpeg = (((pendingValue *

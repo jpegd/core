@@ -15,8 +15,6 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 			throw "No ETHOracle address in network's config file";
 		if (!config.jpegOracle)
 			throw "No JPEGOracle address in network's config file";
-		if (!config.jpegLock)
-			throw "No JPEGLock address in network's config file";
 		if (!config.cigStaking)
 			throw "No JPEGCardsCigStaking address in network's config file";
 		if (!config.dao)
@@ -62,7 +60,6 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 			config.jpegOracle,
 			vaultConfig.floorOracle,
 			vaultConfig.specialNFTs ?? [],
-			config.jpegLock,
 			config.cigStaking,
 			[
 				vaultConfig.debtInterestApr,
