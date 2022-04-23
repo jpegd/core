@@ -81,7 +81,7 @@ describe("NFTVault", () => {
     await stablecoin.deployed();
 
     const MockAggregator = await ethers.getContractFactory("MockV3Aggregator");
-    jpegOracle = await MockAggregator.deploy(8, 1e8);
+    jpegOracle = await MockAggregator.deploy(8, 100000);
     await jpegOracle.deployed();
 
     ethOracle = await MockAggregator.deploy(8, 3000e8);
@@ -656,12 +656,12 @@ describe("NFTVault", () => {
     await nftVault
       .connect(dao)
       .setPendingNFTValueETH(index, units(50000));
-    await jpeg.transfer(user.address, units(12000000));
-    await jpeg.connect(user).approve(locker.address, units(12000000));
+    await jpeg.transfer(user.address, units(4000000));
+    await jpeg.connect(user).approve(locker.address, units(4000000));
 
     await nftVault.connect(user).finalizePendingNFTValueETH(index);
 
-    expect(await jpeg.balanceOf(locker.address)).to.equal(units(12000000));
+    expect(await jpeg.balanceOf(locker.address)).to.equal(units(4000000));
 
     await nftVault.connect(user).borrow(index, units(3000).mul(6000), false);
 

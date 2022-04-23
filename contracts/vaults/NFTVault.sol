@@ -370,12 +370,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 pendingValue = pendingNFTValueETH[_nftIndex];
         require(pendingValue != 0, "no_pending_value");
         uint256 toLockJpeg = (((pendingValue *
-            _ethPriceUSD() *
+            1 ether *
             settings.creditLimitRate.numerator) /
             settings.creditLimitRate.denominator) *
             settings.valueIncreaseLockRate.numerator) /
             settings.valueIncreaseLockRate.denominator /
-            _jpegPriceUSD();
+            _jpegPriceETH();
 
         //lock JPEG using JPEGLock
         jpegLocker.lockFor(msg.sender, _nftIndex, toLockJpeg);
@@ -448,9 +448,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return _normalizeAggregatorAnswer(ethAggregator);
     }
 
-    /// @dev Returns the current JPEG price in USD
+    /// @dev Returns the current JPEG price in ETH
     /// @return The current JPEG price, 18 decimals
-    function _jpegPriceUSD() internal view returns (uint256) {
+    function _jpegPriceETH() internal view returns (uint256) {
         return _normalizeAggregatorAnswer(jpegAggregator);
     }
 
