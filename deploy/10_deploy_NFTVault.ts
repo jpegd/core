@@ -13,8 +13,6 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 			throw "No PUSD address in network's config file";
 		if (!config.ethOracle)
 			throw "No ETHOracle address in network's config file";
-		if (!config.jpegOracle)
-			throw "No JPEGOracle address in network's config file";
 		if (!config.cigStaking)
 			throw "No JPEGCardsCigStaking address in network's config file";
 		if (!config.dao)
@@ -57,7 +55,6 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 			config.pusd,
 			vaultConfig.nft,
 			config.ethOracle,
-			config.jpegOracle,
 			vaultConfig.floorOracle,
 			vaultConfig.specialNFTs ?? [],
 			config.cigStaking,
