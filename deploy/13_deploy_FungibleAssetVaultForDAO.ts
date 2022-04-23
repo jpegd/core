@@ -6,8 +6,8 @@ import { DEFAULT_ADMIN_ROLE, WHITELISTED_ROLE } from "./constants";
 task("deploy-vaultForDAO", "Deploys the FungibleAssetVaultForDAO contract")
   .addParam("asset", "The asset to deploy the vault for", undefined, types.string)
   .addParam("oracle", "The oracle for the asset", undefined, types.string)
-  .addVariadicPositionalParam("creditLimitRate", "The credit limit rate for the asset", undefined, types.int)
-  .setAction(async ({ asset, oracle, creditLimitRate }, { network, ethers, run, upgrades }) => {
+  .addVariadicPositionalParam("creditlimitrate", "The credit limit rate for the asset", undefined, types.int)
+  .setAction(async ({ asset, oracle, creditlimitrate }, { network, ethers, run, upgrades }) => {
     const configFilePath = path.join(__dirname, "config", network.name + ".json");
     const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
@@ -24,12 +24,12 @@ task("deploy-vaultForDAO", "Deploys the FungibleAssetVaultForDAO contract")
       asset,
       config.pusd,
       oracle,
-      creditLimitRate,
+      creditlimitrate,
     ]);
 
     console.log("FungibleAssetVaultForDAO for asset", asset, "deployed at:", vaultForDAO.address);
 
-    config["vaultForDAO" + asset.substring(asset.length - 5)] = vaultForDAO.address;
+    config["vaultForDAO-" + asset.substring(asset.length - 5)] = vaultForDAO.address;
     fs.writeFileSync(configFilePath, JSON.stringify(config));
 
     console.log("Configuring FungibleAssetVaultForDAO");

@@ -38,7 +38,7 @@ task("deploy-cigStaking", "Deploys the JPEGCardsCigStaking contract")
 
 			await run("verify:verify", {
 				address: cigStaking.address,
-				constructorArguments: [cigConfig.jpegCards, cigConfig.cigarettes],
+				constructorArguments: [config.jpegCards, cigConfig.cigarettes],
 			});
 		}
 

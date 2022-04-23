@@ -22,13 +22,13 @@ task("deploy-stablecoin", "Deploys the Stablecoin contract")
 		config.pusd = pusd.address;
 		fs.writeFileSync(configFilePath, JSON.stringify(config));
 		
-		console.log("Configuring Stablecoing");
+		console.log("Configuring Stablecoin");
 
 		await (await pusd.grantRole(DEFAULT_ADMIN_ROLE, config.dao)).wait();
 		await (await pusd.revokeRole(DEFAULT_ADMIN_ROLE, deployer.address)).wait();
 
 		if (network.name != "hardhat") {
-			console.log("Verifying PreJPEG");
+			console.log("Verifying Stablecoin");
 
 			await run("verify:verify", {
 				address: pusd.address,

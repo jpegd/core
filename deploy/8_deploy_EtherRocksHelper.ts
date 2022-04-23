@@ -22,11 +22,13 @@ task("deploy-rocksHelper", "Deploys the EtherRocksHelper contract")
 		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
 		if (network.name != "hardhat") {
-			console.log("Verifying CryptoPunksHelper");
+			console.log("Verifying EtherRocksHelper");
+			
+			const impl = await (await upgrades.admin.getInstance()).getProxyImplementation(rocksHelper.address);
 
 			await run("verify:verify", {
-				address: rocksHelper.address,
-				constructorArguments: [config.etherRocks],
+				address: impl.address,
+				constructorArguments: [],
 			});
 		}
 
