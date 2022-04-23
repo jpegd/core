@@ -565,7 +565,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IAggregatorV3Interface aggregator = jpegAggregator;
 
         require(address(aggregator) != address(0), "jpeg_oracle_not_set");
-        return _normalizeAggregatorAnswer(jpegAggregator);
+        return _normalizeAggregatorAnswer(aggregator);
     }
 
     /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
