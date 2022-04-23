@@ -138,7 +138,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _nftContract The NFT contrat address. It could also be the address of an helper contract
     /// if the target NFT isn't an ERC721 (CryptoPunks as an example)
     /// @param _ethAggregator Chainlink ETH/USD price feed address
-    /// @param _jpegAggregator Chainlink JPEG/USD price feed address
     /// @param _floorOracle Chainlink floor oracle address
     /// @param _typeInitializers Used to initialize NFT categories with their value and NFT indexes.
     /// Floor NFT shouldn't be initialized this way
@@ -147,7 +146,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IStableCoin _stablecoin,
         IERC721Upgradeable _nftContract,
         IAggregatorV3Interface _ethAggregator,
-        IAggregatorV3Interface _jpegAggregator,
         IAggregatorV3Interface _floorOracle,
         NFTCategoryInitializer[] calldata _typeInitializers,
         IJPEGCardsCigStaking _cigStaking,
@@ -202,7 +200,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         stablecoin = _stablecoin;
         ethAggregator = _ethAggregator;
-        jpegAggregator = _jpegAggregator;
         floorOracle = _floorOracle;
         cigStaking = _cigStaking;
         nftContract = _nftContract;
@@ -347,6 +344,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         );
 
         settings.cigStakedCreditLimitRate = _cigCreditLimitRate;
+    }
+    
+    /// @notice Allows the DAO to set the JPEG oracle
+    /// @param _aggregator new oracle address
+    function setJPEGAggregator(IAggregatorV3Interface _aggregator) external onlyRole(DAO_ROLE) {
+        require(address(_aggregator) != address(0), "invalid_address");
+        require(address(jpegAggregator) == address(0), "already_set");
+
+        jpegAggregator = _aggregator;
     }
 
     /// @notice Allows the DAO to change fallback oracle
@@ -556,6 +562,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev Returns the current JPEG price in ETH
     /// @return The current JPEG price, 18 decimals
     function _jpegPriceETH() internal view returns (uint256) {
+        IAggregatorV3Interface aggregator = jpegAggregator;
+
+        require(address(aggregator) != address(0), "jpeg_oracle_not_set");
         return _normalizeAggregatorAnswer(jpegAggregator);
     }
 
