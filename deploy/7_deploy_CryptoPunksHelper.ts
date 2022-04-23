@@ -24,9 +24,11 @@ task("deploy-punksHelper", "Deploys the CryptoPunksHelper contract")
 		if (network.name != "hardhat") {
 			console.log("Verifying CryptoPunksHelper");
 
+			const impl = await (await upgrades.admin.getInstance()).getProxyImplementation(punksHelper.address);
+
 			await run("verify:verify", {
-				address: punksHelper.address,
-				constructorArguments: [config.cryptoPunks],
+				address: impl.address,
+				constructorArguments: [],
 			});
 		}
 
