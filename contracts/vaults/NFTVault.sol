@@ -70,7 +70,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         Rate organizationFeeRate;
         Rate insurancePurchaseRate;
         Rate insuranceLiquidationPenaltyRate;
-        uint256 insuraceRepurchaseTimeLimit;
+        uint256 insuranceRepurchaseTimeLimit;
         uint256 borrowAmountCap;
     }
 
@@ -390,10 +390,17 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         jpegLocker.setLockTime(_newLockTime);
     }
 
+    /// @notice Allows the DAO to change the amount of time insurance remains valid after liquidation
+    /// @param _newLimit New time limit 
+    function setInsuranceRepurchaseTimeLimit(uint256 _newLimit) external onlyRole(DAO_ROLE) {
+        require(_newLimit != 0, "invalid_limit");
+        settings.insuranceRepurchaseTimeLimit = _newLimit;
+    }
+
     /// @notice Allows the DAO to bypass the floor oracle and override the NFT floor value
     /// @param _newFloor The new floor
     function overrideFloor(uint256 _newFloor) external onlyRole(DAO_ROLE) {
-        require(_newFloor != 0, "Invalid floor");
+        require(_newFloor != 0, "invalid_floor");
         nftTypeValueETH[bytes32(0)] = _newFloor;
         daoFloorOverride = true;
     }
@@ -1026,7 +1033,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             "non_insurance"
         );
         require(
-            position.liquidatedAt + settings.insuraceRepurchaseTimeLimit >=
+            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit >=
                 block.timestamp,
             "insurance_expired"
         );
@@ -1067,7 +1074,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         require(address(0) != owner, "no_position");
         require(position.liquidatedAt != 0, "not_liquidated");
         require(
-            position.liquidatedAt + settings.insuraceRepurchaseTimeLimit <
+            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit <
                 block.timestamp,
             "insurance_not_expired"
         );

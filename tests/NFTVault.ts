@@ -215,6 +215,8 @@ describe("NFTVault", () => {
   });
 
   it("should be able to borrow with cig staked", async () => {
+    await cigStaking.unpause();
+
     const index = 1000;
     const borrowAmount = units(3000).mul(50).mul(39).div(100);
     await erc721.mint(user.address, index);
@@ -246,6 +248,8 @@ describe("NFTVault", () => {
   });
 
   it("credit limit rate should go back to normal after unstaking cig", async () => {
+    await cigStaking.unpause();
+
     await erc721.mint(user.address, 200);
     await erc721.connect(user).approve(cigStaking.address, 200);
     await cigStaking.connect(user).deposit(200);
@@ -527,6 +531,8 @@ describe("NFTVault", () => {
   });
 
   it("should be able to liquidate borrow position with staked cig", async () => {
+    await cigStaking.unpause();
+    
     await erc721.mint(user.address, 200);
     await erc721.connect(user).approve(cigStaking.address, 200);
     await cigStaking.connect(user).deposit(200);
@@ -932,6 +938,22 @@ describe("NFTVault", () => {
     expect((await nftVault.settings()).borrowAmountCap).to.equal(
       units(3000).mul(2000)
     );
+  });
+
+  it("should be able to update insuranceRepurchaseTimeLimit", async () => {
+    await expect(
+      nftVault.setBorrowAmountCap(units(3000).mul(2000))
+    ).to.revertedWith(
+      "AccessControl: account " +
+        owner.address.toLowerCase() +
+        " is missing role " +
+        dao_role
+    );
+
+    await expect(nftVault.connect(dao).setInsuranceRepurchaseTimeLimit(0)).to.be.revertedWith("invalid_limit");
+    await nftVault.connect(dao).setInsuranceRepurchaseTimeLimit(1);
+
+    expect((await nftVault.settings()).insuranceRepurchaseTimeLimit).to.equal(1);
   });
 
   it("should be able to update debtInterestApr", async () => {
