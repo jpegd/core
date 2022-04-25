@@ -34,7 +34,16 @@ describe("JPEGCardsCigStaking", () => {
     expect(await cigStaking.cigs(0)).to.be.true;
   });
 
+  it("should allow the owner to unpause/pause", async () => {
+    await cigStaking.unpause();
+    expect(await cigStaking.paused()).to.be.false;
+    await cigStaking.pause();
+    expect(await cigStaking.paused()).to.be.true;
+  })
+
   it("should allow users to deposit 1 cig per address", async () => {
+    await cigStaking.unpause();
+
     await cards.mint(owner.address, 0);
     await cards.mint(user.address, 1);
     await cards.mint(user.address, 2);
@@ -54,6 +63,8 @@ describe("JPEGCardsCigStaking", () => {
   });
 
   it("should allow users to withdraw their cig", async () => {
+    await cigStaking.unpause();
+
     await expect(cigStaking.withdraw(0)).to.be.revertedWith("NOT_STAKED");
 
     await cards.mint(owner.address, 0);

@@ -42,8 +42,11 @@ module.exports = {
     kovan: {
       url: "https://eth-kovan.alchemyapi.io/v2/" + process.env.ALCHEMY_API_KEY,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
-      gasPrice: 10000000000,
     },
+    mainnet: {
+      url: "https://eth-mainnet.alchemyapi.io/v2/" + process.env.ALCHEMY_API_KEY,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+    }
   },
   solidity: {
     compilers: [
@@ -52,7 +55,7 @@ module.exports = {
         settings: {
           optimizer: {
             enabled: true,
-            runs: 1000,
+            runs: 900,
           },
         },
       },
