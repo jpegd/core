@@ -106,5 +106,9 @@ abstract contract NFTEscrow is Initializable {
         return (salt, predictedAddress);
     }
 
+    /// @notice Can be called to rescue an NFT using a FlashEscrow contract.
+    /// It transfers the NFT from the address calculated with `precompute(msg.sender, _idx)` to `msg.sender`
+    function rescueNFT(uint256 _idx) external virtual;
+
     uint256[50] private __gap;
 }

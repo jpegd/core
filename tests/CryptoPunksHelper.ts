@@ -98,4 +98,15 @@ describe("CryptoPunksHelper", () => {
       "NFTEscrow: invalid_owner"
     );
   });
+
+  it("should allow the owner of an NFT in a precomputed address to call rescueNFT", async () => {
+    await cryptoPunks.connect(user).getPunk(1);
+    const { predictedAddress } = await helper.precompute(user.address, 1);
+    await cryptoPunks.connect(user).transferPunk(predictedAddress, 1);
+
+    await expect(helper.rescueNFT(1)).to.be.revertedWith("NOT_OWNER");
+    await helper.connect(user).rescueNFT(1);
+
+    expect(await cryptoPunks.punkIndexToAddress(1)).to.equal(user.address);
+  });
 });
