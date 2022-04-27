@@ -57,6 +57,18 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
         _transferFrom(_from, _to, _idx);
     }
 
+    /// @inheritdoc NFTEscrow
+    function rescueNFT(uint256 _idx) external override {
+        IEtherRocks rocks = IEtherRocks(nftAddress);
+        (, address predictedAddress) = precompute(msg.sender, _idx);
+        (address owner,,,) = rocks.getRockInfo(_idx);
+        require(owner == predictedAddress, "NOT_OWNER");
+        assert(owner != address(this)); //this should never happen
+
+        _executeTransfer(msg.sender, _idx);
+        rocks.giftRock(_idx, msg.sender);
+    }
+
     /// @dev Implementation of {transferFrom} and {safeTransferFrom}. We are using {NFTEscrow} for atomic transfers.
     /// See {NFTEscrow} for more info
     /// @param _from The sender address

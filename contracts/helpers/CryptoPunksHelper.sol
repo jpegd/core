@@ -57,6 +57,19 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
         _transferFrom(_from, _to, _idx);
     }
 
+    /// @inheritdoc NFTEscrow
+    function rescueNFT(uint256 _idx) external override {
+        ICryptoPunks punks = ICryptoPunks(nftAddress);
+        
+        (, address predictedAddress) = precompute(msg.sender, _idx);
+        address owner = punks.punkIndexToAddress(_idx);
+        require(owner == predictedAddress, "NOT_OWNER");
+        assert(owner != address(this)); //this should never happen
+
+        _executeTransfer(msg.sender, _idx);
+        punks.transferPunk(msg.sender, _idx);
+    }
+
     /// @dev Implementation of {transferFrom} and {safeTransferFrom}. We are using {NFTEscrow} for atomic transfers.
     /// See {NFTEscrow} for more info
     /// @param _from The sender address

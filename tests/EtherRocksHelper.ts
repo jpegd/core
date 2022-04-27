@@ -109,4 +109,15 @@ describe("EtherRocksHelper", () => {
       "NFTEscrow: invalid_owner"
     );
   });
+
+  it("should allow the owner of an NFT in a precomputed address to call rescueNFT", async () => {
+    await rocks.connect(user).buyRock(0);
+    const { predictedAddress } = await helper.precompute(user.address, 0);
+    await rocks.connect(user).giftRock(0, predictedAddress);
+
+    await expect(helper.rescueNFT(0)).to.be.revertedWith("NOT_OWNER");
+    await helper.connect(user).rescueNFT(0);
+
+    expect((await rocks.getRockInfo(0))[0]).to.equal(user.address);
+  });
 });
