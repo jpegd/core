@@ -39,6 +39,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     );
     event Repurchased(address indexed owner, uint256 indexed index);
     event InsuranceExpired(address indexed owner, uint256 indexed index);
+    event DaoFloorChanged(uint256 newFloor);
 
     enum BorrowType {
         NOT_CONFIRMED,
@@ -403,6 +404,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         require(_newFloor != 0, "invalid_floor");
         nftTypeValueETH[bytes32(0)] = _newFloor;
         daoFloorOverride = true;
+
+        emit DaoFloorChanged(_newFloor);
     }
 
     /// @notice Allows the DAO to stop overriding floor
@@ -964,14 +967,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows members of the `LIQUIDATOR_ROLE` to liquidate a position. Positions can only be liquidated
     /// once their debt amount exceeds the minimum liquidation debt to collateral value rate.
     /// In order to liquidate a position, the liquidator needs to repay the user's outstanding debt.
-    /// If the position is not insured, it's closed immediately and the collateral is sent to the liquidator.
+    /// If the position is not insured, it's closed immediately and the collateral is sent to `_recipient`.
     /// If the position is insured, the position remains open (interest doesn't increase) and the owner of the position has a certain amount of time
     /// (`insuranceRepurchaseTimeLimit`) to fully repay the liquidator and pay an additional liquidation fee (`insuranceLiquidationPenaltyRate`), if this
     /// is done in time the user gets back their collateral and their position is automatically closed. If the user doesn't repurchase their collateral
     /// before the time limit passes, the liquidator can claim the liquidated NFT and the position is closed
     /// @dev Emits a {Liquidated} event
     /// @param _nftIndex The NFT to liquidate
-    function liquidate(uint256 _nftIndex)
+    /// @param _recipient The address to send the NFT to
+    function liquidate(uint256 _nftIndex, address _recipient)
         external
         onlyRole(LIQUIDATOR_ROLE)
         validNFTIndex(_nftIndex)
@@ -1009,7 +1013,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             positionOwner[_nftIndex] = address(0);
             delete positions[_nftIndex];
             positionIndexes.remove(_nftIndex);
-            nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
+            nftContract.transferFrom(address(this), _recipient, _nftIndex);
         }
 
         emit Liquidated(msg.sender, posOwner, _nftIndex, insured);
@@ -1064,7 +1068,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// after the time period defined with `insuranceRepurchaseTimeLimit` has expired and the position owner has not repurchased the collateral.
     /// @dev Emits an {InsuranceExpired} event
     /// @param _nftIndex The NFT to claim
-    function claimExpiredInsuranceNFT(uint256 _nftIndex)
+    /// @param _recipient The address to send the NFT to
+    function claimExpiredInsuranceNFT(uint256 _nftIndex, address _recipient)
         external
         validNFTIndex(_nftIndex)
         nonReentrant
@@ -1084,7 +1089,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         delete positions[_nftIndex];
         positionIndexes.remove(_nftIndex);
 
-        nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
+        nftContract.transferFrom(address(this), _recipient, _nftIndex);
 
         emit InsuranceExpired(owner, _nftIndex);
     }

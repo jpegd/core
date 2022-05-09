@@ -418,14 +418,14 @@ describe("NFTVault", () => {
   });
 
   it("should be able to liquidate borrow position without insurance", async () => {
-    await expect(nftVault.connect(user).liquidate(10001)).to.be.revertedWith(
+    await expect(nftVault.connect(user).liquidate(10001, owner.address)).to.be.revertedWith(
       "AccessControl: account " +
         user.address.toLowerCase() +
         " is missing role " +
         liquidator_role
     );
 
-    await expect(nftVault.connect(dao).liquidate(10001)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(10001, owner.address)).to.be.revertedWith(
       "invalid_nft"
     );
 
@@ -443,7 +443,7 @@ describe("NFTVault", () => {
     const borrowAmount = units(29000);
     await nftVault.connect(user).borrow(index, borrowAmount, false);
 
-    await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
       "position_not_liquidatable"
     );
 
@@ -461,16 +461,16 @@ describe("NFTVault", () => {
     position = await nftVault.showPosition(index);
     expect(position.liquidatable).to.be.equal(true);
 
-    await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
       "ERC20: insufficient allowance"
     );
 
     await stablecoin.connect(dao).approve(nftVault.address, units(30000));
-    await nftVault.connect(dao).liquidate(index);
+    await nftVault.connect(dao).liquidate(index, owner.address);
 
     expect(await stablecoin.balanceOf(dao.address)).to.be.gt(0);
 
-    expect(await erc721.ownerOf(index)).to.be.equal(dao.address);
+    expect(await erc721.ownerOf(index)).to.be.equal(owner.address);
 
     position = await nftVault.showPosition(index);
     expect(position.owner).to.equal(ZERO_ADDRESS);
@@ -500,14 +500,14 @@ describe("NFTVault", () => {
     // treat to change eth price
     await ethOracle.updateAnswer(100e8);
 
-    await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
       "ERC20: insufficient allowance"
     );
 
     await stablecoin.connect(dao).approve(nftVault.address, units(30000));
-    await nftVault.connect(dao).liquidate(index);
+    await nftVault.connect(dao).liquidate(index, owner.address);
 
-    await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
       "liquidated"
     );
 
@@ -543,18 +543,18 @@ describe("NFTVault", () => {
     await erc721.connect(user).approve(nftVault.address, index);
     await nftVault.connect(user).borrow(index, borrowAmount, false);
 
-    await expect(nftVault.connect(user).liquidate(10001)).to.be.revertedWith(
+    await expect(nftVault.connect(user).liquidate(10001, owner.address)).to.be.revertedWith(
       "AccessControl: account " +
         user.address.toLowerCase() +
         " is missing role " +
         liquidator_role
     );
 
-    await expect(nftVault.connect(dao).liquidate(10001)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(10001, owner.address)).to.be.revertedWith(
       "invalid_nft"
     );
 
-    await expect(nftVault.connect(dao).liquidate(index)).to.be.revertedWith(
+    await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
       "position_not_liquidatable"
     );
     
@@ -569,11 +569,11 @@ describe("NFTVault", () => {
     expect(position.liquidatable).to.be.equal(true);
 
     await stablecoin.connect(dao).approve(nftVault.address, liquidationCost);
-    await nftVault.connect(dao).liquidate(index);
+    await nftVault.connect(dao).liquidate(index, owner.address);
 
     expect(await stablecoin.balanceOf(dao.address)).to.be.gt(0);
 
-    expect(await erc721.ownerOf(index)).to.be.equal(dao.address);
+    expect(await erc721.ownerOf(index)).to.be.equal(owner.address);
 
     position = await nftVault.showPosition(index);
     expect(position.owner).to.equal(ZERO_ADDRESS);
@@ -604,7 +604,7 @@ describe("NFTVault", () => {
     await ethOracle.updateAnswer(100e8);
 
     await stablecoin.connect(dao).approve(nftVault.address, units(30000));
-    await nftVault.connect(dao).liquidate(index);
+    await nftVault.connect(dao).liquidate(index, owner.address);
 
     await expect(nftVault.connect(user).closePosition(index)).to.be.revertedWith("liquidated");
   });
@@ -637,7 +637,7 @@ describe("NFTVault", () => {
     await ethOracle.updateAnswer(100e8);
 
     await stablecoin.connect(dao).approve(nftVault.address, units(70000));
-    await nftVault.connect(dao).liquidate(index);
+    await nftVault.connect(dao).liquidate(index, owner.address);
 
     const elapsed = (await currentTimestamp()) - initialTimestamp;
     const totalDebt = borrowAmount.add(
@@ -704,9 +704,9 @@ describe("NFTVault", () => {
 
     await stablecoin.connect(dao).approve(nftVault.address, units(70000));
     await expect(
-      nftVault.connect(dao).claimExpiredInsuranceNFT(index)
+      nftVault.connect(dao).claimExpiredInsuranceNFT(index, owner.address)
     ).to.be.revertedWith("not_liquidated");
-    await nftVault.connect(dao).liquidate(index);
+    await nftVault.connect(dao).liquidate(index, owner.address);
 
     const elapsed = (await currentTimestamp()) - initialTimestamp;
     const totalDebt = borrowAmount.add(
@@ -722,7 +722,7 @@ describe("NFTVault", () => {
     await stablecoin.connect(user).approve(nftVault.address, toRepurchase);
 
     await expect(
-      nftVault.connect(dao).claimExpiredInsuranceNFT(index)
+      nftVault.connect(dao).claimExpiredInsuranceNFT(index, owner.address)
     ).to.be.revertedWith("insurance_not_expired");
 
     await timeTravel(86400 * 3);
@@ -731,14 +731,14 @@ describe("NFTVault", () => {
       "insurance_expired"
     );
 
-    await expect(nftVault.claimExpiredInsuranceNFT(index)).to.be.revertedWith(
+    await expect(nftVault.claimExpiredInsuranceNFT(index, owner.address)).to.be.revertedWith(
       "unauthorized"
     );
 
-    await nftVault.connect(dao).claimExpiredInsuranceNFT(index);
-    expect(await erc721.ownerOf(index)).to.equal(dao.address);
+    await nftVault.connect(dao).claimExpiredInsuranceNFT(index, owner.address);
+    expect(await erc721.ownerOf(index)).to.equal(owner.address);
     await expect(
-      nftVault.connect(dao).claimExpiredInsuranceNFT(index)
+      nftVault.connect(dao).claimExpiredInsuranceNFT(index, owner.address)
     ).to.be.revertedWith("no_position");
 
     expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
