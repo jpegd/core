@@ -99,37 +99,37 @@ describe("LPFarming", () => {
   });
 
   it("should not allow an epoch with invalid parameters", async () => {
-    await expect(farming.newEpoch(0, 0, 0)).to.be.revertedWith(
+    await expect(farming.newEpoch(1, 1, 0)).to.be.revertedWith(
       "Invalid start block"
     );
     let blockNumber = await ethers.provider.getBlockNumber();
     await expect(
-      farming.newEpoch(blockNumber + 1, blockNumber + 1, 0)
+      farming.newEpoch(blockNumber + 2, blockNumber + 2, 0)
     ).to.be.revertedWith("Invalid end block");
     blockNumber = await ethers.provider.getBlockNumber();
     await expect(
-      farming.newEpoch(blockNumber + 1, blockNumber + 2, 0)
+      farming.newEpoch(blockNumber + 2, blockNumber + 3, 0)
     ).to.be.revertedWith("Invalid reward per block");
   });
 
   it("should update epoch", async () => {
     let blockNumber = await ethers.provider.getBlockNumber();
-    await farming.newEpoch(blockNumber + 1, blockNumber + 11, 100);
+    await farming.newEpoch(blockNumber + 2, blockNumber + 12, 100);
     expect(await jpeg.balanceOf(farming.address)).to.equal(1000);
 
-    await mineBlocks(4);
+    await mineBlocks(5);
     blockNumber = await ethers.provider.getBlockNumber();
-    await farming.newEpoch(blockNumber + 1, blockNumber + 11, 100);
+    await farming.newEpoch(blockNumber + 2, blockNumber + 12, 100);
     expect(await jpeg.balanceOf(farming.address)).to.equal(1500);
 
-    await mineBlocks(4);
+    await mineBlocks(5);
     blockNumber = await ethers.provider.getBlockNumber();
-    await farming.newEpoch(blockNumber + 1, blockNumber + 11, 50);
+    await farming.newEpoch(blockNumber + 2, blockNumber + 12, 50);
     expect(await jpeg.balanceOf(farming.address)).to.equal(1500);
 
-    await mineBlocks(4);
+    await mineBlocks(5);
     blockNumber = await ethers.provider.getBlockNumber();
-    await farming.newEpoch(blockNumber + 1, blockNumber + 2, 100);
+    await farming.newEpoch(blockNumber + 2, blockNumber + 3, 100);
     expect(await jpeg.balanceOf(farming.address)).to.equal(1350);
   });
 
@@ -189,7 +189,7 @@ describe("LPFarming", () => {
 
   it("users can deposit/withdraw/claim", async () => {
     let blockNumber = await ethers.provider.getBlockNumber();
-    await farming.newEpoch(blockNumber + 1, blockNumber + 100000000000000, 100);
+    await farming.newEpoch(blockNumber + 2, blockNumber + 100000000000000, 100);
     await jpeg.transfer(jpeg.address, await jpeg.balanceOf(owner.address));
 
     await farming.add(20, lpTokens[0].address); // 50 JPEG per block
@@ -289,6 +289,10 @@ describe("LPFarming", () => {
       "bob reward: ",
       (await farming.pendingReward(0, bob.address)).toString()
     );
+
+    expect(await farming.pendingReward(1, owner.address)).to.equal(0);
+    expect(await farming.pendingReward(1, alice.address)).to.equal(0);
+    expect(await farming.pendingReward(1, bob.address)).to.equal(0);
 
     owner_reward += 25 * 1000;
     alice_reward += 16.666 * 1000;

@@ -67,8 +67,8 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @dev Used to calculate the share of `rewardPerBlock` for each pool.
     uint256 public totalAllocPoint;
 
-    /// @dev User's (total) withdrawable rewards
-    mapping(address => uint256) private userRewards;
+    /// @dev User's withdrawable rewards per pool
+    mapping(address => mapping(uint256 => uint256)) private userRewards;
 
     /// @param _jpeg The reward token
     constructor(address _jpeg) {
@@ -76,7 +76,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
     }
 
     /// @notice Allows the owner to start a new epoch. Can only be called when there's no ongoing epoch
-    /// @param _startBlock The new epoch's start block. Has to be greater than the previous epoch's `endBlock`
+    /// @param _startBlock The new epoch's start block. If 0, takes the value of `block.number`
     /// @param _endBlock The new epoch's end block. Has to be greater than `_startBlock`
     /// @param _rewardPerBlock The new epoch's amount of rewards to distribute per block. Must be greater than 0
     function newEpoch(
@@ -84,7 +84,10 @@ contract LPFarming is ReentrancyGuard, NoContract {
         uint256 _endBlock,
         uint256 _rewardPerBlock
     ) external onlyOwner {
-        require(_startBlock >= block.number, "Invalid start block");
+        if (_startBlock == 0)
+            _startBlock = block.number;
+        else
+            require(_startBlock >= block.number, "Invalid start block");
         require(_endBlock > _startBlock, "Invalid end block");
         require(_rewardPerBlock != 0, "Invalid reward per block");
 
@@ -179,7 +182,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
         }
         return
             //rewards that the user had already accumulated but not claimed
-            userRewards[_user] +
+            userRewards[_user][_pid] +
             //subtracting the user's `lastAccRewardPerShare` from the pool's `accRewardPerShare` results in the amount of rewards per share
             //the pool has accumulated since the user's last claim, multiplying it by the user's shares results in the amount of new rewards claimable
             //by the user
@@ -297,7 +300,7 @@ contract LPFarming is ReentrancyGuard, NoContract {
         uint256 pending = (user.amount *
             (accRewardPerShare - user.lastAccRewardPerShare)) / 1e36;
         if (pending != 0) {
-            userRewards[msg.sender] += pending;
+            userRewards[msg.sender][_pid] += pending;
         }
 
         user.lastAccRewardPerShare = accRewardPerShare;
@@ -312,11 +315,11 @@ contract LPFarming is ReentrancyGuard, NoContract {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
-        uint256 rewards = userRewards[msg.sender];
+        uint256 rewards = userRewards[msg.sender][_pid];
         require(rewards != 0, "no_reward");
 
+        userRewards[msg.sender][_pid] = 0;
         jpeg.safeTransfer(msg.sender, rewards);
-        userRewards[msg.sender] = 0;
 
         emit Claim(msg.sender, _pid, rewards);
     }
@@ -325,16 +328,16 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @dev Emits a {ClaimAll} event
     function claimAll() external nonReentrant noContract {
         uint256 length = poolInfo.length;
+        uint256 rewards;
         for (uint256 i; i < length; ++i) {
             _updatePool(i);
             _withdrawReward(i);
+            rewards += userRewards[msg.sender][i];
+            userRewards[msg.sender][i] = 0;
         }
-
-        uint256 rewards = userRewards[msg.sender];
         require(rewards != 0, "no_reward");
 
         jpeg.safeTransfer(msg.sender, rewards);
-        userRewards[msg.sender] = 0;
 
         emit ClaimAll(msg.sender, rewards);
     }
