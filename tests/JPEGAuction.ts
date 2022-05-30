@@ -2,8 +2,8 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
 import { solidity } from "ethereum-waffle";
 import { BigNumber } from "ethers";
-import { ethers } from "hardhat";
-import { Auction, JPEG, TestERC721, JPEGCardsCigStaking } from "../types";
+import { ethers, upgrades } from "hardhat";
+import { JPEGAuction, JPEG, TestERC721, JPEGCardsCigStaking, MockAuction } from "../types";
 import { timeTravel, units, ZERO_ADDRESS } from "./utils";
 
 const { expect } = chai;
@@ -13,12 +13,13 @@ chai.use(solidity);
 const minter_role =
   "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6";
 
-describe("Auction", () => {
+describe("JPEGAuction", () => {
   let owner: SignerWithAddress, user: SignerWithAddress;
-  let auction: Auction;
+  let auction: JPEGAuction;
   let cards: TestERC721;
   let jpeg: JPEG;
   let cigStaking: JPEGCardsCigStaking;
+  let legacyAuction: MockAuction;
 
   beforeEach(async () => {
     const accounts = await ethers.getSigners();
@@ -37,8 +38,11 @@ describe("Auction", () => {
     cigStaking = await Staking.deploy(cards.address, [2]);
     await cigStaking.unpause();
 
-    const Auction = await ethers.getContractFactory("Auction");
-    auction = await Auction.deploy(jpeg.address, cards.address, cigStaking.address, units(5_000_000), 7 * 24 * 3600, { numerator: 1, denominator: 100 });
+    const MockAuction = await ethers.getContractFactory("MockAuction");
+    legacyAuction = await MockAuction.deploy();
+
+    const Auction = await ethers.getContractFactory("JPEGAuction");
+    auction = <JPEGAuction>await upgrades.deployProxy(Auction, [jpeg.address, cards.address, cigStaking.address, legacyAuction.address, units(5_000_000), 7 * 24 * 3600, 600, { numerator: 1, denominator: 100 }]);
   });
 
   it("should allow the owner to create a new auction", async () => {
@@ -211,10 +215,12 @@ describe("Auction", () => {
 
     await expect(auction.bid(0)).to.be.revertedWith("NOT_AUTHORIZED");
 
-    await cards.mint(owner.address, 2);
-    await cigStaking.addCig(2);
-    await cards.setApprovalForAll(cigStaking.address, true);
-    await cigStaking.deposit(2);
+    await auction.addLegacyAccounts([owner.address]);
+    await expect(auction.bid(0)).to.be.revertedWith("NOT_AUTHORIZED");
+
+    await expect(auction.addLegacyAccounts([owner.address])).to.be.revertedWith("ACCOUNT_ALREADY_STAKING");
+
+    await legacyAuction.setAuthorized(owner.address, true);
 
     await expect(auction.bid(0, { value: units(1.009) })).to.be.revertedWith("INVALID_BID");
 
@@ -230,12 +236,47 @@ describe("Auction", () => {
     expect((await auction.auctions(0)).highestBidOwner).to.equal(user.address);
     expect((await auction.getAuctionBid(0, user.address))).to.equal(units(1.05));
 
-    await cigStaking.withdraw(2);
-
-    await expect(auction.bid(0, { value: units(1) })).to.be.revertedWith("NOT_AUTHORIZED");
-
     expect((await auction.getActiveBids(user.address))).to.deep.equal([BigNumber.from(0)]);
     expect((await auction.getActiveBids(owner.address))).to.deep.equal([BigNumber.from(0)]);
+  });
+
+  it("should extend the auction's end time if a user bids when the remaning time is less than bidTimeIncrement", async () => {
+    const ERC721 = await ethers.getContractFactory("TestERC721");
+    const nft = await ERC721.deploy();
+    await nft.mint(owner.address, 1);
+
+    await nft.setApprovalForAll(auction.address, true);
+    
+    await cards.mint(user.address, 1);
+    await cards.connect(user).setApprovalForAll(auction.address, true);
+
+    await auction.connect(user).depositCard(1);
+
+    await cards.mint(owner.address, 2);
+    await cards.setApprovalForAll(auction.address, true);
+
+    await auction.depositCard(2);
+
+    const currentTimestamp = (await ethers.provider.getBlock("latest")).timestamp;
+    await auction.newAuction(nft.address, 1, currentTimestamp + 100, currentTimestamp + 1300, units(1));
+
+    await timeTravel(100);
+    
+    await auction.bid(0, {value: units(1)});
+
+    expect((await auction.auctions(0)).endTime).to.equal(currentTimestamp + 1300);
+
+    await timeTravel(600);
+
+    await auction.connect(user).bid(0, {value: units(2)});
+
+    expect((await auction.auctions(0)).endTime).to.equal(currentTimestamp + 1303);
+
+    await timeTravel(500);
+
+    await auction.bid(0, {value: units(2)});
+
+    expect((await auction.auctions(0)).endTime).to.equal(currentTimestamp + 1804);
   });
 
   it("should allow users to bid in multiple auctions", async () => {

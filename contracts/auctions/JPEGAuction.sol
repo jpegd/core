@@ -1,18 +1,19 @@
+// SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/IERC721Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/structs/EnumerableSetUpgradeable.sol";
 
 import "../interfaces/IJPEGCardsCigStaking.sol";
 
-contract Auction is Ownable, ReentrancyGuard {
-    using EnumerableSet for EnumerableSet.UintSet;
+contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
+    using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
 
     event NewAuction(
-        IERC721 indexed nft,
+        IERC721Upgradeable indexed nft,
         uint256 indexed index,
         uint256 startTime
     );
@@ -25,14 +26,13 @@ contract Auction is Ownable, ReentrancyGuard {
     event CardDeposited(address indexed account, uint256 index);
     event JPEGWithdrawn(address indexed account, uint256 amount);
     event CardWithdrawn(address indexed account, uint256 index);
-    event NFTClaimed(
-        uint256 indexed auctionId
-    );
+    event NFTClaimed(uint256 indexed auctionId);
     event BidWithdrawn(
         uint256 indexed auctionId,
         address indexed account,
         uint256 bidValue
     );
+    event BidTimeIncrementChanged(uint256 newTime, uint256 oldTime);
     event JPEGLockAmountChanged(uint256 newLockAmount, uint256 oldLockAmount);
     event LockDurationChanged(uint256 newDuration, uint256 oldDuration);
     event MinimumIncrementRateChanged(
@@ -48,7 +48,8 @@ contract Auction is Ownable, ReentrancyGuard {
     enum StakeMode {
         CIG,
         JPEG,
-        CARD
+        CARD,
+        LEGACY
     }
 
     struct UserInfo {
@@ -58,7 +59,7 @@ contract Auction is Ownable, ReentrancyGuard {
     }
 
     struct Auction {
-        IERC721 nftAddress;
+        IERC721Upgradeable nftAddress;
         uint256 nftIndex;
         uint256 startTime;
         uint256 endTime;
@@ -68,34 +69,43 @@ contract Auction is Ownable, ReentrancyGuard {
         mapping(address => uint256) bids;
     }
 
-    IERC20 public immutable jpeg;
-    IERC721 public immutable cards;
-    IJPEGCardsCigStaking public immutable cigStaking;
+    IERC20Upgradeable public jpeg;
+    IERC721Upgradeable public cards;
+    IJPEGCardsCigStaking public cigStaking;
+    JPEGAuction public legacyAuction;
 
     uint256 public lockDuration;
     uint256 public jpegAmountNeeded;
+    uint256 public bidTimeIncrement;
     uint256 public auctionsLength;
 
     Rate public minIncrementRate;
 
     mapping(address => UserInfo) public userInfo;
-    mapping(address => EnumerableSet.UintSet) internal userAuctions;
+    mapping(address => EnumerableSetUpgradeable.UintSet) internal userAuctions;
     mapping(uint256 => Auction) public auctions;
 
-    constructor(
-        IERC20 _jpeg,
-        IERC721 _cards,
+    function initialize(
+        IERC20Upgradeable _jpeg,
+        IERC721Upgradeable _cards,
         IJPEGCardsCigStaking _cigStaking,
+        JPEGAuction _legacyAuction,
         uint256 _jpegLockAmount,
         uint256 _lockDuration,
+        uint256 _bidTimeIncrement,
         Rate memory _incrementRate
-    ) {
+    ) external initializer {
+        __Ownable_init();
+        __ReentrancyGuard_init();
+
         jpeg = _jpeg;
         cards = _cards;
         cigStaking = _cigStaking;
+        legacyAuction = _legacyAuction;
 
         setJPEGLockAmount(_jpegLockAmount);
         setLockDuration(_lockDuration);
+        setBidTimeIncrement(_bidTimeIncrement);
         setMinimumIncrementRate(_incrementRate);
     }
 
@@ -106,7 +116,7 @@ contract Auction is Ownable, ReentrancyGuard {
     /// @param _endTime The time at which the auction ends
     /// @param _minBid The minimum bid value
     function newAuction(
-        IERC721 _nft,
+        IERC721Upgradeable _nft,
         uint256 _idx,
         uint256 _startTime,
         uint256 _endTime,
@@ -164,7 +174,11 @@ contract Auction is Ownable, ReentrancyGuard {
     /// @param _idx The index of the Card to deposit
     function depositCard(uint256 _idx) public nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
-        require(user.stakeMode == StakeMode.CIG, "ALREADY_STAKING");
+        StakeMode stakeMode = user.stakeMode;
+        require(
+            stakeMode == StakeMode.CIG || stakeMode == StakeMode.LEGACY,
+            "ALREADY_STAKING"
+        );
 
         user.stakeMode = StakeMode.CARD;
         user.stakeArgument = _idx;
@@ -180,9 +194,10 @@ contract Auction is Ownable, ReentrancyGuard {
     /// @param _auctionIndex The index of the auction to bid on
     function bid(uint256 _auctionIndex) public payable nonReentrant {
         Auction storage auction = auctions[_auctionIndex];
+        uint256 endTime = auction.endTime;
 
         require(block.timestamp >= auction.startTime, "NOT_STARTED");
-        require(block.timestamp < auction.endTime, "ENDED_OR_INVALID");
+        require(block.timestamp < endTime, "ENDED_OR_INVALID");
 
         require(isAuthorized(msg.sender), "NOT_AUTHORIZED");
 
@@ -199,12 +214,16 @@ contract Auction is Ownable, ReentrancyGuard {
         );
 
         auction.highestBidOwner = msg.sender;
-        auction.bids[msg.sender] += msg.value;
+        auction.bids[msg.sender] = totalBid;
 
         if (previousBid == 0)
             assert(userAuctions[msg.sender].add(_auctionIndex));
 
-        emit NewBid(_auctionIndex, msg.sender, msg.value);
+        uint256 bidIncrement = bidTimeIncrement;
+        if (bidIncrement > endTime - block.timestamp)
+            auction.endTime = block.timestamp + bidIncrement;
+
+        emit NewBid(_auctionIndex, msg.sender, totalBid);
     }
 
     /// @notice Allows the highest bidder to claim the NFT they bid on if the auction is already over.
@@ -214,9 +233,16 @@ contract Auction is Ownable, ReentrancyGuard {
 
         require(auction.highestBidOwner == msg.sender, "NOT_WINNER");
         require(block.timestamp >= auction.endTime, "NOT_ENDED");
-        require(userAuctions[msg.sender].remove(_auctionIndex), "ALREADY_CLAIMED");
+        require(
+            userAuctions[msg.sender].remove(_auctionIndex),
+            "ALREADY_CLAIMED"
+        );
 
-        auction.nftAddress.transferFrom(address(this), msg.sender, auction.nftIndex);
+        auction.nftAddress.transferFrom(
+            address(this),
+            msg.sender,
+            auction.nftIndex
+        );
 
         emit NFTClaimed(_auctionIndex);
     }
@@ -308,19 +334,29 @@ contract Auction is Ownable, ReentrancyGuard {
         if (stakeMode == StakeMode.CARD) return true;
         else if (stakeMode == StakeMode.JPEG)
             return userInfo[_account].stakeArgument >= jpegAmountNeeded;
-        else return cigStaking.isUserStaking(_account);
+        else if (stakeMode == StakeMode.CIG)
+            return cigStaking.isUserStaking(_account);
+        else return legacyAuction.isAuthorized(_account);
     }
 
     /// @return The list of active bids for an account.
     /// @param _account The address to check.
-    function getActiveBids(address _account) external view returns (uint256[] memory) {
+    function getActiveBids(address _account)
+        external
+        view
+        returns (uint256[] memory)
+    {
         return userAuctions[_account].values();
     }
 
     /// @return The active bid of an account for an auction.
     /// @param _auctionIndex The auction to retrieve the bid from.
     /// @param _account The bidder's account
-    function getAuctionBid(uint256 _auctionIndex, address _account) external view returns (uint256) {
+    function getAuctionBid(uint256 _auctionIndex, address _account)
+        external
+        view
+        returns (uint256)
+    {
         return auctions[_auctionIndex].bids[_account];
     }
 
@@ -331,7 +367,7 @@ contract Auction is Ownable, ReentrancyGuard {
 
         require(block.timestamp >= auction.endTime, "NOT_ENDED");
         address highestBidder = auction.highestBidOwner;
-        require(highestBidder != address(0), "NFT_UNSOLD");        
+        require(highestBidder != address(0), "NFT_UNSOLD");
         require(!auction.ownerClaimed, "ALREADY_CLAIMED");
 
         auction.ownerClaimed = true;
@@ -349,12 +385,43 @@ contract Auction is Ownable, ReentrancyGuard {
 
         require(block.timestamp >= auction.endTime, "NOT_ENDED");
         address highestBidder = auction.highestBidOwner;
-        require(highestBidder == address(0), "NFT_SOLD"); 
+        require(highestBidder == address(0), "NFT_SOLD");
         require(!auction.ownerClaimed, "ALREADY_CLAIMED");
 
         auction.ownerClaimed = true;
 
-        auction.nftAddress.transferFrom(address(this), msg.sender, auction.nftIndex);
+        auction.nftAddress.transferFrom(
+            address(this),
+            msg.sender,
+            auction.nftIndex
+        );
+    }
+
+    /// @notice Allows the owner to add accounts that are staking in the legacy contract
+    /// @param _accounts The accounts to add
+    function addLegacyAccounts(address[] calldata _accounts)
+        external
+        onlyOwner
+    {
+        for (uint256 i; i < _accounts.length; ++i) {
+            address account = _accounts[i];
+            require(
+                userInfo[account].stakeMode == StakeMode.CIG,
+                "ACCOUNT_ALREADY_STAKING"
+            );
+
+            userInfo[account].stakeMode = StakeMode.LEGACY;
+        }
+    }
+
+    /// @notice Allows the owner to set the amount of time to increase an auction by if a bid happens in the last few minutes
+    /// @param _newTime The new amount of time
+    function setBidTimeIncrement(uint256 _newTime) public onlyOwner {
+        require(_newTime > 0, "INVALID_TIME");
+
+        emit BidTimeIncrementChanged(_newTime, bidTimeIncrement);
+
+        bidTimeIncrement = _newTime;
     }
 
     /// @notice Allows the owner to set the amount of JPEG to lock to be able to participate in auctions.
