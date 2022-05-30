@@ -136,6 +136,15 @@ describe("JPEGAuction", () => {
     await expect(auction.connect(user).correctDepositedJPEG()).to.be.revertedWith("STAKING_CARD");
   });
 
+  it("should allow LEGACY StakeMode users to renounce and switch to CIG StakeMode", async () => {
+    await auction.addLegacyAccounts([owner.address]);
+
+    await auction.renounceLegacyStakeMode();
+    await expect(auction.renounceLegacyStakeMode()).to.be.revertedWith("NOT_LEGACY");
+
+    expect((await auction.userInfo(owner.address)).stakeMode).to.equal(0);
+  });
+
   it("should allow users to withdraw their card/jpeg after the lock elapses if they aren't participating in any auction", async () => {
     await cards.mint(user.address, 1);
     await cards.connect(user).setApprovalForAll(auction.address, true);

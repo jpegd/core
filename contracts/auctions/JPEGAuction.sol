@@ -326,6 +326,15 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit JPEGWithdrawn(msg.sender, jpegAmount);
     }
 
+    /// @notice Allows users to renounce to LEGACY StakeMode.
+    /// Useful if they want to switch to CIG StakeMode without depositing JPEG/a Card.
+    function renounceLegacyStakeMode() external nonReentrant {
+        UserInfo storage user = userInfo[msg.sender];
+        require(user.stakeMode == StakeMode.LEGACY, "NOT_LEGACY");
+
+        delete userInfo[msg.sender];
+    }
+
     /// @return Whether a user is authorized to bid or not.
     /// @param _account The address to check.
     function isAuthorized(address _account) public view returns (bool) {
