@@ -8,25 +8,23 @@ import "../interfaces/IStrategy.sol";
 
 contract MockStrategy is IStrategy {
     address public override want;
-    address public jpeg;
     address public baseRewardPool;
 
     constructor(
         address _want,
-        address _jpeg,
         address _baseRewardPool
     ) {
         want = _want;
-        jpeg = _jpeg;
         baseRewardPool = _baseRewardPool;
     }
 
     function deposit() external override {}
 
-    function withdraw(address token) external override {
+    function withdraw(address token) external override returns (uint256 balance) {
+        balance = IERC20(token).balanceOf(address(this));
         IERC20(token).transfer(
             msg.sender,
-            IERC20(token).balanceOf(address(this))
+            balance
         );
     }
 
@@ -44,26 +42,5 @@ contract MockStrategy is IStrategy {
 
     function balanceOf() external view override returns (uint256) {
         return IERC20(want).balanceOf(address(this));
-    }
-
-    function balanceOfJPEG() public view override returns (uint256) {
-        return IERC20(jpeg).balanceOf(address(this));
-    }
-
-    function withdrawJPEG(address to) external override {
-        IERC20(jpeg).transfer(to, balanceOfJPEG());
-    }
-
-    function convexConfig()
-        external
-        view
-        override
-        returns (
-            address,
-            address,
-            uint256
-        )
-    {
-        return (address(0), baseRewardPool, 0);
     }
 }

@@ -12,6 +12,8 @@ interface IBaseRewardPool {
         external
         returns (bool);
 
+    function donate(uint256 _amount) external returns(bool);
+
     function balanceOf(address) external view returns (uint256);
 
     function extraRewards(uint256) external view returns (address);

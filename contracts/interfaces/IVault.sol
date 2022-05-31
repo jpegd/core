@@ -3,7 +3,7 @@ pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface IYVault is IERC20 {
+interface IVault is IERC20 {
     function token() external view returns (address);
 
     function controller() external view returns (address);

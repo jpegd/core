@@ -6,21 +6,24 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "../../../interfaces/ISwapRouter.sol";
-import "../../../interfaces/IUniswapV2Router.sol";
 import "../../../interfaces/ICurve.sol";
+import "../../../interfaces/I3CRVZap.sol";
 import "../../../interfaces/IBooster.sol";
 import "../../../interfaces/IBaseRewardPool.sol";
 
 import "../../../interfaces/IController.sol";
 import "../../../interfaces/IFungibleAssetVaultForDAO.sol";
 
+import "../../../interfaces/IStrategy.sol";
+
 /// @title JPEG'd PUSD Convex autocompounding strategy
-/// @notice This strategy autocompounds Convex rewards from the PUSD/USDC/USDT/MIM Curve pool.
+/// @notice This strategy autocompounds Convex rewards from the PUSD/USDC/USDT/DAI Curve pool.
 /// @dev The strategy deposits either USDC or PUSD in the Curve pool depending on which one has lower liquidity.
 /// The strategy sells reward tokens for USDC. If the pool has less PUSD than USDC, this contract uses the
 /// USDC {FungibleAssetVaultForDAO} to mint PUSD using USDC as collateral
-contract StrategyPUSDConvex is AccessControl {
+contract StrategyPUSDConvex is AccessControl, IStrategy {
     using SafeERC20 for IERC20;
+    using SafeERC20 for ICurve;
 
     event Harvested(uint256 wantEarned);
 
@@ -31,49 +34,58 @@ contract StrategyPUSDConvex is AccessControl {
 
     /// @param booster Convex Booster's address
     /// @param baseRewardPool Convex BaseRewardPool's address
-    /// @param pid The Convex pool id for PUSD/USDC/USDT/MIM LP tokens
+    /// @param pid The Convex pool id for PUSD/3CRV LP tokens
     struct ConvexConfig {
         IBooster booster;
         IBaseRewardPool baseRewardPool;
         uint256 pid;
     }
 
-    /// @param curve Curve's PUSD/USDC/USDT/MIM pool address
+    /// @param zap The 3CRV zap address
+    /// @param crv3Index The USDC token index in curve's pool
     /// @param usdcIndex The USDC token index in curve's pool
     /// @param pusdIndex The PUSD token index in curve's pool
-    struct CurveConfig {
-        ICurve curve;
+    struct ZapConfig {
+        I3CRVZap zap;
+        uint256 crv3Index;
         uint256 usdcIndex;
         uint256 pusdIndex;
     }
 
-    /// @param uniswapV2 The UniswapV2 (or Sushiswap) router address
-    /// @param uniswapV3 The UniswapV3 router address
-    struct DexConfig {
-        IUniswapV2Router uniswapV2;
-        ISwapRouter uniswapV3;
+    /// @param lp The curve LP token
+    /// @param ethIndex The eth index in the curve LP pool
+    struct CurveSwapConfig {
+        ICurve lp;
+        uint256 ethIndex;
     }
 
-    /// @param rewardTokens The Convex reward tokens
     /// @param controller The strategy controller
     /// @param usdcVault The JPEG'd USDC {FungibleAssetVaultForDAO} address
     struct StrategyConfig {
-        IERC20[] rewardTokens;
         IController controller;
         IFungibleAssetVaultForDAO usdcVault;
     }
 
+    struct StrategyTokens {
+        ICurve want;
+        IERC20 pusd;
+        IERC20 weth;
+        IERC20 usdc;
+        IERC20 cvx;
+        IERC20 crv;
+    }
+
     bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
 
-    /// @notice The PUSD/USDC/USDT/MIM Curve LP token
-    IERC20 public immutable want;
-    IERC20 public immutable jpeg;
-    IERC20 public immutable pusd;
-    IERC20 public immutable weth;
-    IERC20 public immutable usdc;
+    /// @notice The PUSD/USDC/USDT/DAI Curve LP token
+    StrategyTokens public strategyTokens;
 
-    DexConfig public dexConfig;
-    CurveConfig public curveConfig;
+    ISwapRouter public immutable v3Router;
+
+    CurveSwapConfig public cvxEth;
+    CurveSwapConfig public crvEth;
+
+    ZapConfig public zapConfig;
     ConvexConfig public convexConfig;
     StrategyConfig public strategyConfig;
 
@@ -82,49 +94,47 @@ contract StrategyPUSDConvex is AccessControl {
 
     /// @notice lifetime strategy earnings denominated in `want` token
     uint256 public earned;
-
-    /// @param _want The PUSD/USDC/USDT/MIM Curve LP token
-    /// @param _jpeg The JPEG token address
-    /// @param _pusd The PUSD token address
-    /// @param _weth The WETH token address
-    /// @param _usdc The USDC token address
-    /// @param _dexConfig See {DexConfig} struct
-    /// @param _curveConfig See {CurveConfig} struct
+    
+    /// @param _strategyTokens tokens relevant to this strategy
+    /// @param _v3Router The Uniswap V3 router
+    /// @param _zapConfig See {ZapConfig} struct
     /// @param _convexConfig See {ConvexConfig} struct
     /// @param _strategyConfig See {StrategyConfig} struct
     /// @param _performanceFee The rate of USDC to be sent to the DAO/strategists
     constructor(
-        address _want,
-        address _jpeg,
-        address _pusd,
-        address _weth,
-        address _usdc,
-        DexConfig memory _dexConfig,
-        CurveConfig memory _curveConfig,
+        StrategyTokens memory _strategyTokens,
+        address _v3Router,
+        CurveSwapConfig memory _cvxEth,
+        CurveSwapConfig memory _crvEth,
+        ZapConfig memory _zapConfig,
         ConvexConfig memory _convexConfig,
         StrategyConfig memory _strategyConfig,
         Rate memory _performanceFee
     ) {
-        require(_want != address(0), "INVALID_WANT");
-        require(_jpeg != address(0), "INVALID_JPEG");
-        require(_pusd != address(0), "INVALID_PUSD");
-        require(_weth != address(0), "INVALID_WETH");
-        require(_usdc != address(0), "INVALID_USDC");
+        require(address(_strategyTokens.want) != address(0), "INVALID_WANT");
+        require(address(_strategyTokens.pusd) != address(0), "INVALID_PUSD");
+        require(address(_strategyTokens.weth) != address(0), "INVALID_WETH");
+        require(address(_strategyTokens.usdc) != address(0), "INVALID_USDC");
+
+        require(address(_strategyTokens.cvx) != address(0), "INVALID_CVX");
+        require(address(_strategyTokens.crv) != address(0), "INVALID_CRV");
+
+        require(_v3Router != address(0), "INVALID_UNISWAP_V3");
+
+        require(address(_cvxEth.lp) != address(0), "INVALID_CVXETH_LP");
+        require(address(_crvEth.lp) != address(0), "INVALID_CRVETH_LP");
+        require(_cvxEth.ethIndex < 2, "INVALID_ETH_INDEX");
+        require(_crvEth.ethIndex < 2, "INVALID_ETH_INDEX");
+
+        require(address(_zapConfig.zap) != address(0), "INVALID_3CRV_ZAP");
         require(
-            address(_dexConfig.uniswapV2) != address(0),
-            "INVALID_UNISWAP_V2"
-        );
-        require(
-            address(_dexConfig.uniswapV3) != address(0),
-            "INVALID_UNISWAP_V3"
-        );
-        require(address(_curveConfig.curve) != address(0), "INVALID_CURVE");
-        require(
-            _curveConfig.pusdIndex != _curveConfig.usdcIndex,
+            _zapConfig.pusdIndex != _zapConfig.crv3Index,
             "INVALID_CURVE_INDEXES"
         );
-        require(_curveConfig.pusdIndex < 4, "INVALID_PUSD_CURVE_INDEX");
-        require(_curveConfig.usdcIndex < 4, "INVALID_USDC_CURVE_INDEX");
+        require(_zapConfig.pusdIndex < 2, "INVALID_PUSD_CURVE_INDEX");
+        require(_zapConfig.crv3Index < 2, "INVALID_3CRV_CURVE_INDEX");
+        require(_zapConfig.usdcIndex < 4, "INVALID_USDC_CURVE_INDEX");
+
         require(
             address(_convexConfig.booster) != address(0),
             "INVALID_CONVEX_BOOSTER"
@@ -142,26 +152,39 @@ contract StrategyPUSDConvex is AccessControl {
             "INVALID_USDC_VAULT"
         );
 
-        for (uint256 i; i < _strategyConfig.rewardTokens.length; ++i) {
-            require(
-                address(_strategyConfig.rewardTokens[i]) != address(0),
-                "INVALID_REWARD_TOKEN"
-            );
-        }
-
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         setPerformanceFee(_performanceFee);
 
-        want = IERC20(_want);
-        jpeg = IERC20(_jpeg);
-        pusd = IERC20(_pusd);
-        weth = IERC20(_weth);
-        usdc = IERC20(_usdc);
+        strategyTokens = _strategyTokens;
 
-        dexConfig = _dexConfig;
-        curveConfig = _curveConfig;
+        cvxEth = _cvxEth;
+        crvEth = _crvEth;
+
+        v3Router = ISwapRouter(_v3Router);
+
+        zapConfig = _zapConfig;
         convexConfig = _convexConfig;
         strategyConfig = _strategyConfig;
+
+        _strategyTokens.want.safeApprove(
+            address(_convexConfig.booster),
+            type(uint256).max
+        );
+        _strategyTokens.cvx.safeApprove(address(_cvxEth.lp), type(uint256).max);
+        _strategyTokens.crv.safeApprove(address(_crvEth.lp), type(uint256).max);
+        _strategyTokens.weth.safeApprove(address(_v3Router), type(uint256).max);
+        _strategyTokens.usdc.safeApprove(
+            address(_strategyConfig.usdcVault),
+            type(uint256).max
+        );
+        _strategyTokens.usdc.safeApprove(
+            address(_zapConfig.zap),
+            type(uint256).max
+        );
+        _strategyTokens.pusd.safeApprove(
+            address(_zapConfig.zap),
+            type(uint256).max
+        );
     }
 
     modifier onlyController() {
@@ -213,7 +236,7 @@ contract StrategyPUSDConvex is AccessControl {
 
     /// @return The amount of `want` tokens held by this contract
     function balanceOfWant() public view returns (uint256) {
-        return want.balanceOf(address(this));
+        return strategyTokens.want.balanceOf(address(this));
     }
 
     /// @return The amount of `want` tokens deposited in the Convex pool by this contract
@@ -221,60 +244,47 @@ contract StrategyPUSDConvex is AccessControl {
         return convexConfig.baseRewardPool.balanceOf(address(this));
     }
 
-    /// @return The amount of JPEG currently held by this contract and the amount of JPEG
-    /// rewards available from Convex
-    function balanceOfJPEG() external view returns (uint256) {
-        IERC20 _jpeg = jpeg;
-        uint256 availableBalance = _jpeg.balanceOf(address(this));
-
-        IBaseRewardPool baseRewardPool = convexConfig.baseRewardPool;
-        uint256 length = baseRewardPool.extraRewardsLength();
-        for (uint256 i; i < length; ++i) {
-            IBaseRewardPool extraReward = IBaseRewardPool(
-                baseRewardPool.extraRewards(i)
-            );
-            if (address(_jpeg) == extraReward.rewardToken())
-                return availableBalance + extraReward.earned(address(this));
-        }
-
-        return availableBalance;
-    }
-
     /// @return The total amount of `want` tokens this contract manages (held + deposited)
-    function balanceOf() external view returns (uint256) {
+    function balanceOf() external view override returns (uint256) {
         return balanceOfWant() + balanceOfPool();
     }
 
+    /// @return The `want` token
+    function want() external view override returns (address) {
+        return address(strategyTokens.want);
+    }
+
     /// @notice Allows anyone to deposit the total amount of `want` tokens in this contract into Convex
-    function deposit() public {
-        uint256 balance = want.balanceOf(address(this));
+    function deposit() public override {
         ConvexConfig memory convex = convexConfig;
-        want.safeIncreaseAllowance(address(convex.booster), balance);
         convex.booster.depositAll(convex.pid, true);
     }
 
-    /// @notice Controller only function that allows to withdraw non-strategy tokens (e.g tokens sent accidentally)
-    function withdraw(IERC20 _asset)
+    /// @notice Controller only function that allows to withdraw non-strategy tokens (e.g tokens sent accidentally).
+    /// CVX and CRV can be withdrawn with this function.
+    function withdraw(address _asset)
         external
+        override
         onlyController
         returns (uint256 balance)
     {
-        require(want != _asset, "want");
-        require(pusd != _asset, "pusd");
-        require(usdc != _asset, "usdc");
-        require(weth != _asset, "weth");
-        require(jpeg != _asset, "jpeg");
-        balance = _asset.balanceOf(address(this));
-        _asset.safeTransfer(address(strategyConfig.controller), balance);
+        require(address(strategyTokens.want) != _asset, "want");
+        require(address(strategyTokens.pusd) != _asset, "pusd");
+        require(address(strategyTokens.usdc) != _asset, "usdc");
+        require(address(strategyTokens.weth) != _asset, "weth");
+        balance = IERC20(_asset).balanceOf(address(this));
+        IERC20(_asset).safeTransfer(address(strategyConfig.controller), balance);
     }
 
     /// @notice Allows the controller to withdraw `want` tokens. Normally used with a vault withdrawal
     /// @param _amount The amount of `want` tokens to withdraw
-    function withdraw(uint256 _amount) external onlyController {
-        address vault = strategyConfig.controller.vaults(address(want));
+    function withdraw(uint256 _amount) external override onlyController {
+        ICurve _want = strategyTokens.want;
+
+        address vault = strategyConfig.controller.vaults(address(_want));
         require(vault != address(0), "ZERO_VAULT"); // additional protection so we don't burn the funds
 
-        uint256 balance = want.balanceOf(address(this));
+        uint256 balance = _want.balanceOf(address(this));
         //if the contract doesn't have enough want, withdraw from Convex
         if (balance < _amount) {
             unchecked {
@@ -285,30 +295,21 @@ contract StrategyPUSDConvex is AccessControl {
             }
         }
 
-        want.safeTransfer(vault, _amount);
+        _want.safeTransfer(vault, _amount);
     }
 
     /// @notice Allows the controller to withdraw all `want` tokens. Normally used when migrating strategies
     /// @return balance The total amount of funds that have been withdrawn
-    function withdrawAll() external onlyController returns (uint256 balance) {
-        address vault = strategyConfig.controller.vaults(address(want));
+    function withdrawAll() external override onlyController returns (uint256 balance) {
+        ICurve _want = strategyTokens.want;
+
+        address vault = strategyConfig.controller.vaults(address(_want));
         require(vault != address(0), "ZERO_VAULT"); // additional protection so we don't burn the funds
 
         convexConfig.baseRewardPool.withdrawAllAndUnwrap(false);
 
-        balance = want.balanceOf(address(this));
-        want.safeTransfer(vault, balance);
-    }
-
-    /// @notice Allows the controller to claim JPEG rewards from Convex
-    /// and withdraw JPEG to the `_to` address
-    /// @param _to The address to send JPEG to
-    function withdrawJPEG(address _to) external onlyController {
-        // claim from convex rewards pool
-        convexConfig.baseRewardPool.getReward(_to, true);
-        uint256 jpegBalance = jpeg.balanceOf(address(this));
-
-        if (jpegBalance != 0) jpeg.safeTransfer(_to, jpegBalance);
+        balance = _want.balanceOf(address(this));
+        _want.safeTransfer(vault, balance);
     }
 
     /// @notice Allows members of the `STRATEGIST_ROLE` to compound Convex rewards into Curve
@@ -316,88 +317,86 @@ contract StrategyPUSDConvex is AccessControl {
     function harvest(uint256 minOutCurve) external onlyRole(STRATEGIST_ROLE) {
         convexConfig.baseRewardPool.getReward(address(this), true);
 
+        IERC20 _usdc = strategyTokens.usdc;
         //Prevent `Stack too deep` errors
         {
-            DexConfig memory dex = dexConfig;
-            IERC20[] memory rewardTokens = strategyConfig.rewardTokens;
-            IERC20 _weth = weth;
-            for (uint256 i; i < rewardTokens.length; ++i) {
-                uint256 balance = rewardTokens[i].balanceOf(address(this));
-
-                if (balance != 0)
-                    //minOut is not needed here, we already have it on the Curve deposit
-                    _swapUniswapV2(
-                        dex.uniswapV2,
-                        rewardTokens[i],
-                        _weth,
-                        balance,
-                        0
-                    );
+            uint256 cvxBalance = strategyTokens.cvx.balanceOf(address(this));
+            if (cvxBalance > 0) {
+                CurveSwapConfig memory _cvxEth = cvxEth;
+                //minOut is not needed here, we already have it on the Curve deposit
+                _cvxEth.lp.exchange(
+                    1 - _cvxEth.ethIndex,
+                    _cvxEth.ethIndex,
+                    cvxBalance,
+                    0
+                );
             }
 
+            uint256 crvBalance = strategyTokens.crv.balanceOf(address(this));
+            if (crvBalance > 0) {
+                CurveSwapConfig memory _crvEth = crvEth;
+                //minOut is not needed here, we already have it on the Curve deposit
+                _crvEth.lp.exchange(
+                    1 - _crvEth.ethIndex,
+                    _crvEth.ethIndex,
+                    crvBalance,
+                    0
+                );
+            }
+
+            IERC20 _weth = strategyTokens.weth;
             uint256 wethBalance = _weth.balanceOf(address(this));
             require(wethBalance != 0, "NOOP");
-
-            //handle sending jpeg here
-
-            _weth.safeIncreaseAllowance(address(dex.uniswapV3), wethBalance);
 
             //minOut is not needed here, we already have it on the Curve deposit
             ISwapRouter.ExactInputParams memory params = ISwapRouter
                 .ExactInputParams(
-                    abi.encodePacked(weth, uint24(500), usdc),
+                    abi.encodePacked(_weth, uint24(500), _usdc),
                     address(this),
                     block.timestamp,
                     wethBalance,
                     0
                 );
 
-            dex.uniswapV3.exactInput(params);
+            v3Router.exactInput(params);
         }
 
         StrategyConfig memory strategy = strategyConfig;
-        CurveConfig memory curve = curveConfig;
+        ZapConfig memory zap = zapConfig;
 
-        uint256 usdcBalance = usdc.balanceOf(address(this));
+        uint256 usdcBalance = _usdc.balanceOf(address(this));
 
         //take the performance fee
         uint256 fee = (usdcBalance * performanceFee.numerator) /
             performanceFee.denominator;
-        usdc.safeTransfer(strategy.controller.feeAddress(), fee);
+        _usdc.safeTransfer(strategy.controller.feeAddress(), fee);
         unchecked {
             usdcBalance -= fee;
         }
-        uint256 pusdCurveBalance = curve.curve.balances(curve.pusdIndex);
-        //USDC has 6 decimals while PUSD has 18. We need to convert the USDC
-        //balance to 18 decimals to compare it with the PUSD balance
-        uint256 usdcCurveBalance = curve.curve.balances(curve.usdcIndex) *
-            10**12;
+
+        ICurve _want = strategyTokens.want;
+
+        uint256 pusdCurveBalance = _want.balances(zap.pusdIndex);
+        uint256 crv3Balance = _want.balances(zap.crv3Index);
 
         //The curve pool has 4 tokens, we are doing a single asset deposit with either USDC or PUSD
         uint256[4] memory liquidityAmounts = [uint256(0), 0, 0, 0];
-        if (usdcCurveBalance > pusdCurveBalance) {
+        if (crv3Balance > pusdCurveBalance) {
             //if there's more USDC than PUSD in the pool, use USDC as collateral to mint PUSD
             //and deposit it into the Curve pool
-            usdc.safeIncreaseAllowance(
-                address(strategy.usdcVault),
-                usdcBalance
-            );
             strategy.usdcVault.deposit(usdcBalance);
 
             //check the vault's credit limit, it should be 1:1 for USDC
             uint256 toBorrow = strategy.usdcVault.getCreditLimit(usdcBalance);
 
             strategy.usdcVault.borrow(toBorrow);
-            liquidityAmounts[curve.pusdIndex] = toBorrow;
-
-            pusd.safeIncreaseAllowance(address(curve.curve), toBorrow);
+            liquidityAmounts[zap.pusdIndex] = toBorrow;
         } else {
             //if there's more PUSD than USDC in the pool, deposit USDC
-            liquidityAmounts[curve.usdcIndex] = usdcBalance;
-            usdc.safeIncreaseAllowance(address(curve.curve), usdcBalance);
+            liquidityAmounts[zap.usdcIndex] = usdcBalance;
         }
 
-        curve.curve.add_liquidity(liquidityAmounts, minOutCurve);
+        zap.zap.add_liquidity(address(_want), liquidityAmounts, minOutCurve);
 
         uint256 wantBalance = balanceOfWant();
 
@@ -405,33 +404,5 @@ contract StrategyPUSDConvex is AccessControl {
 
         earned += wantBalance;
         emit Harvested(wantBalance);
-    }
-
-    /// @dev Swaps `tokenIn` for `tokenOut` on UniswapV2 (or Sushiswap)
-    /// @param router The UniswapV2 (or Sushiswap) router
-    /// @param tokenIn The input token for the swap
-    /// @param tokenOut The output token for the swap
-    /// @param amountIn The amount of `tokenIn` to swap
-    /// @param minOut The minimum amount of `tokenOut` to receive for the TX not to revert
-    function _swapUniswapV2(
-        IUniswapV2Router router,
-        IERC20 tokenIn,
-        IERC20 tokenOut,
-        uint256 amountIn,
-        uint256 minOut
-    ) internal {
-        tokenIn.safeIncreaseAllowance(address(router), amountIn);
-
-        address[] memory path = new address[](2);
-        path[0] = address(tokenIn);
-        path[1] = address(tokenOut);
-
-        router.swapExactTokensForTokens(
-            amountIn,
-            minOut,
-            path,
-            address(this),
-            block.timestamp
-        );
     }
 }

@@ -8,7 +8,7 @@ interface IStrategy {
 
     // NOTE: must exclude any tokens used in the yield
     // Controller role - withdraw should return to Controller
-    function withdraw(address) external;
+    function withdraw(address) external returns (uint256);
 
     // Controller | Vault role - withdraw should always return to Vault
     function withdraw(uint256) external;
@@ -18,9 +18,7 @@ interface IStrategy {
 
     function balanceOf() external view returns (uint256);
 
-    function withdrawJPEG(address to) external;
-
-    function convexConfig()
+    /*function convexConfig()
         external
         view
         returns (
@@ -28,6 +26,5 @@ interface IStrategy {
             address baseRewardPool,
             uint256 pid
         );
-
-    function balanceOfJPEG() external view returns (uint256);
+*/
 }

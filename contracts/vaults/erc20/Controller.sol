@@ -14,7 +14,6 @@ contract Controller is AccessControl {
 
     bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
 
-    IERC20 public immutable jpeg;
     address public feeAddress;
 
     mapping(IERC20 => address) public vaults;
@@ -22,10 +21,9 @@ contract Controller is AccessControl {
     mapping(IERC20 => mapping(IStrategy => bool)) public approvedStrategies;
 
     /// @param _feeAddress The address to send fees to
-    constructor(address _jpeg, address _feeAddress) {
+    constructor(address _feeAddress) {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         setFeeAddress(_feeAddress);
-        jpeg = IERC20(_jpeg);
     }
 
     /// @notice Allows the DAO to set the fee receiver address
@@ -92,7 +90,6 @@ contract Controller is AccessControl {
         if (address(_current) != address(0)) {
             //withdraw all funds from the current strategy
             _current.withdrawAll();
-            _current.withdrawJPEG(address(this));
         }
         strategies[_token] = _strategy;
     }
@@ -110,12 +107,6 @@ contract Controller is AccessControl {
     /// @param _token The token to check
     function balanceOf(IERC20 _token) external view returns (uint256) {
         return strategies[_token].balanceOf();
-    }
-
-    /// @return The amount of JPEG available to be withdrawn from `_token`'s strategy
-    /// @param _token The token to check
-    function balanceOfJPEG(IERC20 _token) external view returns (uint256) {
-        return strategies[_token].balanceOfJPEG();
     }
 
     /// @notice Allows members of the `STRATEGIST_ROLE` to withdraw all strategy tokens from a strategy (e.g. In case of a bug in the strategy)
@@ -151,17 +142,5 @@ contract Controller is AccessControl {
     function withdraw(IERC20 _token, uint256 _amount) external {
         require(msg.sender == vaults[_token], "NOT_VAULT");
         strategies[_token].withdraw(_amount);
-    }
-
-    /// @notice Allows the vault for token `_token` to withdraw JPEG from
-    /// `_token`'s strategy
-    /// @param _token The strategy's token
-    /// @param _to The address to send JPEG to
-    function withdrawJPEG(
-        IERC20 _token,
-        address _to
-    ) external {
-        require(msg.sender == vaults[_token], "NOT_VAULT");
-        strategies[_token].withdrawJPEG(_to);
     }
 }

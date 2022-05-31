@@ -6,13 +6,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "../../utils/NoContract.sol";
 import "../../interfaces/IController.sol";
-import "../../interfaces/IMigrateYVaultLPFarming.sol";
 
-/// @title JPEG'd yVault
+/// @title JPEG'd vault
 /// @notice Allows users to deposit fungible assets into autocompounding strategy contracts (e.g. {StrategyPUSDConvex}).
 /// Non whitelisted contracts can't deposit/withdraw.
 /// Owner is DAO
-contract YVault is ERC20, NoContract {
+contract Vault is ERC20, NoContract {
     using SafeERC20 for ERC20;
     using Address for address;
 
@@ -26,8 +25,6 @@ contract YVault is ERC20, NoContract {
 
     ERC20 public immutable token;
     IController public controller;
-
-    address public farm;
 
     Rate internal availableTokensRate;
 
@@ -62,11 +59,6 @@ contract YVault is ERC20, NoContract {
             controller.balanceOf(address(token));
     }
 
-    // @return The amount of JPEG tokens claimable by {YVaultLPFarming}
-    function balanceOfJPEG() external view returns (uint256) {
-        return controller.balanceOfJPEG(address(token));
-    }
-
     /// @notice Allows the owner to set the rate of tokens held by this contract that the underlying strategy should be able to borrow
     /// @param _rate The new rate
     function setAvailableTokensRate(Rate memory _rate) public onlyOwner {
@@ -83,18 +75,7 @@ contract YVault is ERC20, NoContract {
         require(_controller != address(0), "INVALID_CONTROLLER");
         controller = IController(_controller);
     }
-
-    /// @notice Allows the owner to set the yVault LP farm
-    /// @dev Calls migrate on old farm, if any
-    /// @param _farm The new farm
-    function setFarmingPool(address _farm) external onlyOwner {
-        require(_farm != address(0), "INVALID_FARMING_POOL");
-
-        if (farm != address(0)) IMigrateYVaultLPFarming(farm).migrate();
-
-        farm = _farm;
-    }
-
+    
     /// @return How much the vault allows to be borrowed by the underlying strategy.
     /// Sets minimum required on-hand to keep small withdrawals cheap
     function available() public view returns (uint256) {
@@ -168,13 +149,6 @@ contract YVault is ERC20, NoContract {
 
         _token.safeTransfer(msg.sender, backingTokens);
         emit Withdrawal(msg.sender, backingTokens);
-    }
-
-    /// @notice Allows anyone to withdraw JPEG to `farm`
-    function withdrawJPEG() external {
-        address _farm = farm;
-        require(_farm != address(0), "NO_FARM");
-        controller.withdrawJPEG(address(token), _farm);
     }
 
     /// @return The underlying tokens per share
