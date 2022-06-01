@@ -7,7 +7,7 @@ import "../interfaces/IController.sol";
 import "../interfaces/IStrategy.sol";
 
 contract MockStrategy is IStrategy {
-    address public override want;
+    address public want;
     address public baseRewardPool;
 
     constructor(
@@ -20,27 +20,24 @@ contract MockStrategy is IStrategy {
 
     function deposit() external override {}
 
-    function withdraw(address token) external override returns (uint256 balance) {
-        balance = IERC20(token).balanceOf(address(this));
+    function withdraw(address to, address token) external override {
+        uint256 balance = IERC20(token).balanceOf(address(this));
         IERC20(token).transfer(
-            msg.sender,
+            to,
             balance
         );
     }
 
-    function withdraw(uint256 amount) external override {
-        address vault = IController(msg.sender).vaults(want);
-        IERC20(want).transfer(vault, amount);
+    function withdraw(address to, uint256 amount) external override {
+        IERC20(want).transfer(to, amount);
     }
 
-    function withdrawAll() external override returns (uint256) {
-        address vault = IController(msg.sender).vaults(want);
+    function withdrawAll() external override {
         uint256 balance = IERC20(want).balanceOf(address(this));
-        IERC20(want).transfer(vault, balance);
-        return balance;
+        IERC20(want).transfer(msg.sender, balance);
     }
 
-    function balanceOf() external view override returns (uint256) {
+    function totalAssets() external view override returns (uint256) {
         return IERC20(want).balanceOf(address(this));
     }
 }

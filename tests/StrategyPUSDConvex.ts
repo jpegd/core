@@ -2,9 +2,8 @@ import { JsonRpcSigner } from "@ethersproject/providers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
 import { solidity } from "ethereum-waffle";
-import { ethers, network } from "hardhat";
+import { ethers, network, upgrades } from "hardhat";
 import {
-  Controller,
   FungibleAssetVaultForDAO,
   I3CRVZap,
   IBaseRewardPool,
@@ -33,8 +32,8 @@ const whitelisted_role =
 //unfortunately we can't use hardhat_reset as that breaks solidity-coverage
 describe("StrategyPUSDConvex", () => {
   let owner: JsonRpcSigner, user: SignerWithAddress;
-  let strategy: StrategyPUSDConvex, vault: Vault, controller: Controller;
-  let sushiRouter: IUniswapV2Router, uniswapV3Router: ISwapRouter;
+  let strategy: StrategyPUSDConvex, vault: Vault;
+  let uniswapV3Router: ISwapRouter;
   let usdcVault: FungibleAssetVaultForDAO;
   let zap: I3CRVZap, booster: IBooster;
   let want: ICurve,
@@ -67,11 +66,6 @@ describe("StrategyPUSDConvex", () => {
       method: "evm_snapshot",
       params: [],
     })) as string;
-
-    const Controller = await ethers.getContractFactory("Controller", owner);
-    controller = await Controller.deploy(owner._address);
-
-    await controller.grantRole(strategist_role, owner._address);
 
     const Stablecoin = await ethers.getContractFactory("StableCoin", owner);
     pusd = Stablecoin.attach("0x466a756E9A7401B5e2444a3fCB3c2C12FBEa0a54");
@@ -138,10 +132,7 @@ describe("StrategyPUSDConvex", () => {
     );
 
     const Vault = await ethers.getContractFactory("Vault", owner);
-    vault = await Vault.deploy(want.address, controller.address, {
-      numerator: 100,
-      denominator: 100,
-    });
+    vault = <Vault>await upgrades.deployProxy(Vault, [want.address, owner._address, { numerator: 0, denominator: 100 }]);
 
     const AssetVault = await ethers.getContractFactory(
       "FungibleAssetVaultForDAO", owner
@@ -156,13 +147,6 @@ describe("StrategyPUSDConvex", () => {
       )
     );
 
-    sushiRouter = <IUniswapV2Router>(
-      await ethers.getContractAt(
-        "IUniswapV2Router",
-        "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",
-        owner
-      )
-    );
     uniswapV3Router = <ISwapRouter>(
       await ethers.getContractAt(
         "ISwapRouter",
@@ -198,6 +182,7 @@ describe("StrategyPUSDConvex", () => {
         crv: crv.address
       },
       uniswapV3Router.address,
+      owner._address,
       {
         lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
         ethIndex: 0
@@ -218,7 +203,7 @@ describe("StrategyPUSDConvex", () => {
         pid: 91,
       },
       {
-        controller: controller.address,
+        vault: vault.address,
         usdcVault: usdcVault.address,
       },
       {
@@ -227,12 +212,11 @@ describe("StrategyPUSDConvex", () => {
       }
     );
 
-    await strategy.deployed();
     await strategy.grantRole(strategist_role, owner._address);
     await usdcVault.grantRole(whitelisted_role, strategy.address);
 
-    await controller.approveStrategy(want.address, strategy.address);
-    await controller.setStrategy(want.address, strategy.address);
+    await vault.migrateStrategy(strategy.address);
+    await vault.unpause();
   });
 
   afterEach(async () => {
@@ -240,20 +224,6 @@ describe("StrategyPUSDConvex", () => {
       method: "evm_revert",
       params: [snapshot],
     });
-  });
-
-  it("should return the correct name", async () => {
-    expect(await strategy.getName()).to.equal("StrategyPUSDConvex");
-  });
-
-  it("should allow the DAO to change controller", async () => {
-    await expect(strategy.setController(ZERO_ADDRESS)).to.be.revertedWith(
-      "INVALID_CONTROLLER"
-    );
-
-    await strategy.setController(owner._address);
-    const { controller } = await strategy.strategyConfig();
-    expect(controller).to.equal(owner._address);
   });
 
   it("should allow the DAO to change usdc vault", async () => {
@@ -270,68 +240,55 @@ describe("StrategyPUSDConvex", () => {
     await want.transfer(strategy.address, units(500));
     await strategy.deposit();
 
-    expect(await strategy.balanceOfPool()).to.equal(units(500));
+    expect(await strategy.depositedAssets()).to.equal(units(500));
   });
 
-  it("should allow the controller to withdraw non strategy tokens", async () => {
-    await expect(strategy["withdraw(address)"](cvx.address)).to.be.revertedWith(
-      "NOT_CONTROLLER"
-    );
-
+  it("should allow strategists to withdraw non strategy tokens", async () => {
     await expect(
-      controller.inCaseStrategyTokensGetStuck(strategy.address, want.address)
+      strategy["withdraw(address,address)"](owner._address, want.address)
     ).to.be.revertedWith("want");
     await expect(
-      controller.inCaseStrategyTokensGetStuck(strategy.address, usdc.address)
+      strategy["withdraw(address,address)"](owner._address, usdc.address)
     ).to.be.revertedWith("usdc");
     await expect(
-      controller.inCaseStrategyTokensGetStuck(strategy.address, pusd.address)
+      strategy["withdraw(address,address)"](owner._address, pusd.address)
     ).to.be.revertedWith("pusd");
     await expect(
-      controller.inCaseStrategyTokensGetStuck(strategy.address, weth.address)
+      strategy["withdraw(address,address)"](owner._address, weth.address)
     ).to.be.revertedWith("weth");
 
     await cvx.connect(cvxSigner).transfer(strategy.address, units(500));
-    await controller.inCaseStrategyTokensGetStuck(
-      strategy.address,
-      cvx.address
-    );
+    await strategy["withdraw(address,address)"](owner._address, cvx.address);
 
-    expect(await cvx.balanceOf(controller.address)).to.equal(units(500));
+    expect(await cvx.balanceOf(owner._address)).to.equal(units(500));
   });
 
-  it("should allow the controller to withdraw want", async () => {
+  it("should allow the vault to withdraw want", async () => {
     await want.transfer(user.address, units(500));
-    await controller.setVault(want.address, vault.address);
     await want.connect(user).approve(vault.address, units(500));
 
     await vault.connect(user).deposit(units(500));
-    //earn calls the controller's earn which calls the strategy's deposit function
-    await vault.earn();
-    expect(await strategy.balanceOfPool()).to.equal(units(500));
+    expect(await strategy.depositedAssets()).to.equal(units(500));
 
     await want.transfer(strategy.address, units(500));
 
     await vault.connect(user).withdraw(units(250));
     expect(await want.balanceOf(user.address)).to.equal(units(500));
 
-    await vault.connect(user).withdrawAll();
+    await vault.connect(user).withdraw(units(250));
     expect(await want.balanceOf(user.address)).to.equal(units(1000));
   });
 
-  it("should allow the controller to call withdrawAll", async () => {
+  it("should allow the vault to call withdrawAll", async () => {
     await want.approve(vault.address, units(500));
 
     await vault.deposit(units(500));
-    //earn calls the controller's earn which calls the strategy's deposit function
-    await vault.earn();
 
-    await expect(controller.withdrawAll(want.address)).to.be.revertedWith(
-      "ZERO_VAULT"
+    await expect(strategy.withdrawAll()).to.be.revertedWith(
+      "NOT_VAULT"
     );
 
-    await controller.setVault(want.address, vault.address);
-    await controller.withdrawAll(want.address);
+    await vault.migrateStrategy(ZERO_ADDRESS);
 
     expect(await want.balanceOf(vault.address)).to.equal(units(500));
   });
@@ -355,9 +312,7 @@ describe("StrategyPUSDConvex", () => {
     await want.approve(vault.address, ownerWantBalance);
     await vault.deposit(ownerWantBalance);
 
-    await vault.earn();
-
-    expect(await strategy.balanceOfPool()).to.equal(ownerWantBalance);
+    expect(await strategy.depositedAssets()).to.equal(ownerWantBalance);
 
     await crv.connect(crvSigner).approve(rewardPool.address, units(1_000_000));
     await rewardPool.connect(crvSigner).donate(units(1_000_000));
@@ -386,7 +341,7 @@ describe("StrategyPUSDConvex", () => {
       additionalPUSD.add(initialWantPUSDBalance)
     );
 
-    expect(await strategy.balanceOfPool()).to.be.gt(ownerWantBalance);
+    expect(await strategy.depositedAssets()).to.be.gt(ownerWantBalance);
   });
 
   it("should add liquidity with usdc when harvest is called and curve has less usdc than pusd", async () => {
@@ -409,9 +364,7 @@ describe("StrategyPUSDConvex", () => {
     await want.approve(vault.address, ownerWantBalance);
     await vault.deposit(ownerWantBalance);
 
-    await vault.earn();
-
-    expect(await strategy.balanceOfPool()).to.equal(ownerWantBalance);
+    expect(await strategy.depositedAssets()).to.equal(ownerWantBalance);
 
     await crv.connect(crvSigner).approve(rewardPool.address, units(1_000_000));
     await rewardPool.connect(crvSigner).donate(units(1_000_000));
@@ -426,871 +379,934 @@ describe("StrategyPUSDConvex", () => {
 
     expect((await want.balances(1)).div(1e12)).to.be.gt(poolUSDCBalance);
     expect(await usdc.balanceOf(owner._address)).to.be.gt(initialOwnerUSDCBalance);
-    expect(await strategy.balanceOfPool()).to.be.gt(ownerWantBalance);
+    expect(await strategy.depositedAssets()).to.be.gt(ownerWantBalance);
   });
-  
-    it("should revert on deploy with bad arguments", async () => {
-      const Strategy = await ethers.getContractFactory("StrategyPUSDConvex");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: ZERO_ADDRESS,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_WANT");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: ZERO_ADDRESS,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_PUSD");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: ZERO_ADDRESS,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_WETH");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: ZERO_ADDRESS,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_USDC");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: ZERO_ADDRESS,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CVX");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: ZERO_ADDRESS
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CRV");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          ZERO_ADDRESS,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_UNISWAP_V3");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: ZERO_ADDRESS,
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CVXETH_LP");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 2
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_ETH_INDEX");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: ZERO_ADDRESS,
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CRVETH_LP");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 2
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_ETH_INDEX");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: ZERO_ADDRESS,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_3CRV_ZAP");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 0,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CURVE_INDEXES");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 2,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_3CRV_CURVE_INDEX");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 4,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_USDC_CURVE_INDEX");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 2,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_PUSD_CURVE_INDEX");
-  
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: ZERO_ADDRESS,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CONVEX_BOOSTER");
 
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: ZERO_ADDRESS,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CONVEX_BASE_REWARD_POOL");
+  it("should revert on deploy with bad arguments", async () => {
+    const Strategy = await ethers.getContractFactory("StrategyPUSDConvex");
 
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: ZERO_ADDRESS,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_CONTROLLER");
+    await expect(
+      Strategy.deploy(
+        {
+          want: ZERO_ADDRESS,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_WANT");
 
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: ZERO_ADDRESS,
-          },
-          {
-            numerator: 20,
-            denominator: 100,
-          }
-        )
-      ).to.be.revertedWith("INVALID_USDC_VAULT");
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: ZERO_ADDRESS,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_PUSD");
 
-      await expect(
-        Strategy.deploy(
-          {
-            want: want.address,
-            pusd: pusd.address,
-            weth: weth.address,
-            usdc: usdc.address,
-            cvx: cvx.address,
-            crv: crv.address
-          },
-          uniswapV3Router.address,
-          {
-            lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
-            ethIndex: 0
-          },
-          {
-            lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
-            ethIndex: 0
-          },
-          {
-            zap: zap.address,
-            crv3Index: 1,
-            usdcIndex: 2,
-            pusdIndex: 0,
-          },
-          {
-            booster: booster.address,
-            baseRewardPool: rewardPool.address,
-            pid: 91,
-          },
-          {
-            controller: controller.address,
-            usdcVault: usdcVault.address,
-          },
-          {
-            numerator: 20,
-            denominator: 0,
-          }
-        )
-      ).to.be.revertedWith("INVALID_RATE");
-    });
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: ZERO_ADDRESS,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_WETH");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: ZERO_ADDRESS,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_USDC");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: ZERO_ADDRESS,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CVX");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: ZERO_ADDRESS
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CRV");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        ZERO_ADDRESS,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_UNISWAP_V3");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        ZERO_ADDRESS,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_FEE_RECIPIENT");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: ZERO_ADDRESS,
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CVXETH_LP");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 2
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_ETH_INDEX");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: ZERO_ADDRESS,
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CRVETH_LP");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 2
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_ETH_INDEX");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: ZERO_ADDRESS,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_3CRV_ZAP");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 0,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CURVE_INDEXES");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 2,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_3CRV_CURVE_INDEX");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 4,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_USDC_CURVE_INDEX");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 2,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_PUSD_CURVE_INDEX");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: ZERO_ADDRESS,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CONVEX_BOOSTER");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: ZERO_ADDRESS,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_CONVEX_BASE_REWARD_POOL");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: ZERO_ADDRESS,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_VAULT");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: ZERO_ADDRESS,
+        },
+        {
+          numerator: 20,
+          denominator: 100,
+        }
+      )
+    ).to.be.revertedWith("INVALID_USDC_VAULT");
+
+    await expect(
+      Strategy.deploy(
+        {
+          want: want.address,
+          pusd: pusd.address,
+          weth: weth.address,
+          usdc: usdc.address,
+          cvx: cvx.address,
+          crv: crv.address
+        },
+        uniswapV3Router.address,
+        owner._address,
+        {
+          lp: "0xB576491F1E6e5E62f1d8F26062Ee822B40B0E0d4",
+          ethIndex: 0
+        },
+        {
+          lp: "0x8301AE4fc9c624d1D396cbDAa1ed877821D7C511",
+          ethIndex: 0
+        },
+        {
+          zap: zap.address,
+          crv3Index: 1,
+          usdcIndex: 2,
+          pusdIndex: 0,
+        },
+        {
+          booster: booster.address,
+          baseRewardPool: rewardPool.address,
+          pid: 91,
+        },
+        {
+          vault: vault.address,
+          usdcVault: usdcVault.address,
+        },
+        {
+          numerator: 20,
+          denominator: 0,
+        }
+      )
+    ).to.be.revertedWith("INVALID_RATE");
+  });
 });

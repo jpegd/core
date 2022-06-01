@@ -59,10 +59,10 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
         uint256 ethIndex;
     }
 
-    /// @param controller The strategy controller
+    /// @param vault The strategy's vault
     /// @param usdcVault The JPEG'd USDC {FungibleAssetVaultForDAO} address
     struct StrategyConfig {
-        IController controller;
+        address vault;
         IFungibleAssetVaultForDAO usdcVault;
     }
 
@@ -82,6 +82,8 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
     ISwapRouter public immutable v3Router;
 
+    address public feeRecipient;
+
     CurveSwapConfig public cvxEth;
     CurveSwapConfig public crvEth;
 
@@ -94,9 +96,12 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
     /// @notice lifetime strategy earnings denominated in `want` token
     uint256 public earned;
-    
+
     /// @param _strategyTokens tokens relevant to this strategy
     /// @param _v3Router The Uniswap V3 router
+    /// @param _feeAddress The fee recipient address
+    /// @param _cvxEth See {CurveSwapConfig}
+    /// @param _crvEth See {CurveSwapConfig}
     /// @param _zapConfig See {ZapConfig} struct
     /// @param _convexConfig See {ConvexConfig} struct
     /// @param _strategyConfig See {StrategyConfig} struct
@@ -104,6 +109,7 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
     constructor(
         StrategyTokens memory _strategyTokens,
         address _v3Router,
+        address _feeAddress,
         CurveSwapConfig memory _cvxEth,
         CurveSwapConfig memory _crvEth,
         ZapConfig memory _zapConfig,
@@ -143,19 +149,19 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
             address(_convexConfig.baseRewardPool) != address(0),
             "INVALID_CONVEX_BASE_REWARD_POOL"
         );
-        require(
-            address(_strategyConfig.controller) != address(0),
-            "INVALID_CONTROLLER"
-        );
+        require(address(_strategyConfig.vault) != address(0), "INVALID_VAULT");
         require(
             address(_strategyConfig.usdcVault) != address(0),
             "INVALID_USDC_VAULT"
         );
 
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        setFeeRecipient(_feeAddress);
         setPerformanceFee(_performanceFee);
 
         strategyTokens = _strategyTokens;
+
+        feeRecipient = _feeAddress;
 
         cvxEth = _cvxEth;
         crvEth = _crvEth;
@@ -187,11 +193,8 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
         );
     }
 
-    modifier onlyController() {
-        require(
-            msg.sender == address(strategyConfig.controller),
-            "NOT_CONTROLLER"
-        );
+    modifier onlyVault() {
+        require(msg.sender == address(strategyConfig.vault), "NOT_VAULT");
         _;
     }
 
@@ -209,16 +212,6 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
         performanceFee = _performanceFee;
     }
 
-    /// @notice Allows the DAO to set the strategy controller
-    /// @param _controller The new strategy controller
-    function setController(address _controller)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        require(_controller != address(0), "INVALID_CONTROLLER");
-        strategyConfig.controller = IController(_controller);
-    }
-
     /// @notice Allows the DAO to set the USDC vault
     /// @param _vault The new USDC vault
     function setUSDCVault(address _vault)
@@ -229,29 +222,28 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
         strategyConfig.usdcVault = IFungibleAssetVaultForDAO(_vault);
     }
 
-    /// @return The strategy's name
-    function getName() external pure returns (string memory) {
-        return "StrategyPUSDConvex";
+    function setFeeRecipient(address _newRecipient)
+        public
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(_newRecipient != address(0), "INVALID_FEE_RECIPIENT");
+
+        feeRecipient = _newRecipient;
     }
 
     /// @return The amount of `want` tokens held by this contract
-    function balanceOfWant() public view returns (uint256) {
+    function heldAssets() public view returns (uint256) {
         return strategyTokens.want.balanceOf(address(this));
     }
 
     /// @return The amount of `want` tokens deposited in the Convex pool by this contract
-    function balanceOfPool() public view returns (uint256) {
+    function depositedAssets() public view returns (uint256) {
         return convexConfig.baseRewardPool.balanceOf(address(this));
     }
 
     /// @return The total amount of `want` tokens this contract manages (held + deposited)
-    function balanceOf() external view override returns (uint256) {
-        return balanceOfWant() + balanceOfPool();
-    }
-
-    /// @return The `want` token
-    function want() external view override returns (address) {
-        return address(strategyTokens.want);
+    function totalAssets() external view override returns (uint256) {
+        return heldAssets() + depositedAssets();
     }
 
     /// @notice Allows anyone to deposit the total amount of `want` tokens in this contract into Convex
@@ -262,27 +254,30 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
     /// @notice Controller only function that allows to withdraw non-strategy tokens (e.g tokens sent accidentally).
     /// CVX and CRV can be withdrawn with this function.
-    function withdraw(address _asset)
+    function withdraw(address _to, address _asset)
         external
         override
-        onlyController
-        returns (uint256 balance)
+        onlyRole(STRATEGIST_ROLE)
     {
+        require(_to != address(0), "INVALID_ADDRESS");
         require(address(strategyTokens.want) != _asset, "want");
         require(address(strategyTokens.pusd) != _asset, "pusd");
         require(address(strategyTokens.usdc) != _asset, "usdc");
         require(address(strategyTokens.weth) != _asset, "weth");
-        balance = IERC20(_asset).balanceOf(address(this));
-        IERC20(_asset).safeTransfer(address(strategyConfig.controller), balance);
+
+        uint256 balance = IERC20(_asset).balanceOf(address(this));
+        IERC20(_asset).safeTransfer(_to, balance);
     }
 
     /// @notice Allows the controller to withdraw `want` tokens. Normally used with a vault withdrawal
+    /// @param _to The address to send the tokens to
     /// @param _amount The amount of `want` tokens to withdraw
-    function withdraw(uint256 _amount) external override onlyController {
+    function withdraw(address _to, uint256 _amount)
+        external
+        override
+        onlyVault
+    {
         ICurve _want = strategyTokens.want;
-
-        address vault = strategyConfig.controller.vaults(address(_want));
-        require(vault != address(0), "ZERO_VAULT"); // additional protection so we don't burn the funds
 
         uint256 balance = _want.balanceOf(address(this));
         //if the contract doesn't have enough want, withdraw from Convex
@@ -295,21 +290,17 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
             }
         }
 
-        _want.safeTransfer(vault, _amount);
+        _want.safeTransfer(_to, _amount);
     }
 
     /// @notice Allows the controller to withdraw all `want` tokens. Normally used when migrating strategies
-    /// @return balance The total amount of funds that have been withdrawn
-    function withdrawAll() external override onlyController returns (uint256 balance) {
+    function withdrawAll() external override onlyVault {
         ICurve _want = strategyTokens.want;
 
-        address vault = strategyConfig.controller.vaults(address(_want));
-        require(vault != address(0), "ZERO_VAULT"); // additional protection so we don't burn the funds
+        convexConfig.baseRewardPool.withdrawAllAndUnwrap(true);
 
-        convexConfig.baseRewardPool.withdrawAllAndUnwrap(false);
-
-        balance = _want.balanceOf(address(this));
-        _want.safeTransfer(vault, balance);
+        uint256 balance = _want.balanceOf(address(this));
+        _want.safeTransfer(msg.sender, balance);
     }
 
     /// @notice Allows members of the `STRATEGIST_ROLE` to compound Convex rewards into Curve
@@ -369,7 +360,7 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
         //take the performance fee
         uint256 fee = (usdcBalance * performanceFee.numerator) /
             performanceFee.denominator;
-        _usdc.safeTransfer(strategy.controller.feeAddress(), fee);
+        _usdc.safeTransfer(feeRecipient, fee);
         unchecked {
             usdcBalance -= fee;
         }
@@ -398,7 +389,7 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
         zap.zap.add_liquidity(address(_want), liquidityAmounts, minOutCurve);
 
-        uint256 wantBalance = balanceOfWant();
+        uint256 wantBalance = heldAssets();
 
         deposit();
 

@@ -1,161 +1,224 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import "../../utils/NoContract.sol";
-import "../../interfaces/IController.sol";
+import "../../utils/NoContractUpgradeable.sol";
+import "../../interfaces/IStrategy.sol";
 
 /// @title JPEG'd vault
 /// @notice Allows users to deposit fungible assets into autocompounding strategy contracts (e.g. {StrategyPUSDConvex}).
 /// Non whitelisted contracts can't deposit/withdraw.
 /// Owner is DAO
-contract Vault is ERC20, NoContract {
-    using SafeERC20 for ERC20;
-    using Address for address;
+contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
+    using SafeERC20Upgradeable for ERC20Upgradeable;
 
-    event Deposit(address indexed depositor, uint256 wantAmount);
+    event Deposit(address indexed from, uint256 value);
     event Withdrawal(address indexed withdrawer, uint256 wantAmount);
+    event StrategyMigrated(
+        IStrategy indexed newStrategy,
+        IStrategy indexed oldStrategy
+    );
+    event FeeRecipientChanged(
+        address indexed newRecipient,
+        address indexed oldRecipient
+    );
 
     struct Rate {
         uint128 numerator;
         uint128 denominator;
     }
 
-    ERC20 public immutable token;
-    IController public controller;
+    ERC20Upgradeable public token;
 
-    Rate internal availableTokensRate;
+    IStrategy public strategy;
+
+    address public feeRecipient;
+    Rate public depositFeeRate;
 
     /// @param _token The token managed by this vault
-    /// @param _controller The JPEG'd strategies controller
-    constructor(
-        address _token,
-        address _controller,
-        Rate memory _availableTokensRate
-    )
-        ERC20(
-            string(
-                abi.encodePacked("JPEG\xE2\x80\x99d ", ERC20(_token).name())
-            ),
-            string(abi.encodePacked("JPEGD", ERC20(_token).symbol()))
-        )
-    {
-        setController(_controller);
-        setAvailableTokensRate(_availableTokensRate);
-        token = ERC20(_token);
+    /// @param _feeRecipient The fee recipient
+    /// @param _depositFeeRate The deposit fee
+    function initialize(
+        ERC20Upgradeable _token,
+        address _feeRecipient,
+        Rate memory _depositFeeRate
+    ) external initializer {
+        __ERC20_init(
+            string(abi.encodePacked("JPEG\xE2\x80\x99d ", _token.name())),
+            string(abi.encodePacked("JPEGD", _token.symbol()))
+        );
+        __noContract_init();
+
+        _pause();
+
+        setFeeRecipient(_feeRecipient);
+        setDepositFeeRate(_depositFeeRate);
+        token = _token;
     }
 
-    /// @inheritdoc ERC20
+    /// @inheritdoc ERC20Upgradeable
     function decimals() public view virtual override returns (uint8) {
         return token.decimals();
     }
 
-    /// @return The total amount of tokens managed by this vault and the underlying strategy
-    function balance() public view returns (uint256) {
-        return
-            token.balanceOf(address(this)) +
-            controller.balanceOf(address(token));
+    /// @return assets The total amount of tokens managed by this vault and the underlying strategy
+    function totalAssets() public view returns (uint256 assets) {
+        assets = token.balanceOf(address(this));
+
+        IStrategy _strategy = strategy;
+        if (address(_strategy) != address(0)) assets += strategy.totalAssets();
     }
 
-    /// @notice Allows the owner to set the rate of tokens held by this contract that the underlying strategy should be able to borrow
-    /// @param _rate The new rate
-    function setAvailableTokensRate(Rate memory _rate) public onlyOwner {
-        require(
-            _rate.numerator != 0 && _rate.denominator >= _rate.numerator,
-            "INVALID_RATE"
-        );
-        availableTokensRate = _rate;
-    }
-
-    /// @notice ALlows the owner to set this vault's controller
-    /// @param _controller The new controller
-    function setController(address _controller) public onlyOwner {
-        require(_controller != address(0), "INVALID_CONTROLLER");
-        controller = IController(_controller);
-    }
-    
-    /// @return How much the vault allows to be borrowed by the underlying strategy.
-    /// Sets minimum required on-hand to keep small withdrawals cheap
-    function available() public view returns (uint256) {
-        return
-            (token.balanceOf(address(this)) * availableTokensRate.numerator) /
-            availableTokensRate.denominator;
-    }
-
-    /// @notice Deposits `token` into the underlying strategy
-    function earn() external {
-        uint256 _bal = available();
-        ERC20 _token = token;
-        IController _controller = controller;
-        _token.safeTransfer(address(_controller), _bal);
-        _controller.earn(address(_token), _bal);
-    }
-
-    /// @notice Allows users to deposit their entire `token` balance
-    function depositAll() external {
-        deposit(token.balanceOf(msg.sender));
+    /// @return The underlying tokens per share
+    function exchangeRate() external view returns (uint256) {
+        uint256 supply = totalSupply();
+        if (supply == 0) return 0;
+        return (totalAssets() * (10**decimals())) / supply;
     }
 
     /// @notice Allows users to deposit `token`. Contracts can't call this function
     /// @param _amount The amount to deposit
-    function deposit(uint256 _amount) public noContract {
+    function deposit(uint256 _amount)
+        external
+        noContract
+        whenNotPaused
+        returns (uint256 shares)
+    {
         require(_amount != 0, "INVALID_AMOUNT");
-        uint256 balanceBefore = balance();
+
+        IStrategy _strategy = strategy;
+        require(address(_strategy) != address(0), "NO_STRATEGY");
+
+        uint256 balanceBefore = totalAssets();
         uint256 supply = totalSupply();
-        uint256 shares;
+
+        uint256 depositFee = (depositFeeRate.numerator * _amount) /
+            depositFeeRate.denominator;
+        uint256 amountAfterFee = _amount - depositFee;
+
         if (supply == 0) {
-            shares = _amount;
+            shares = amountAfterFee;
         } else {
             //balanceBefore can't be 0 if totalSupply is != 0
-            shares = (_amount * supply) / balanceBefore;
+            shares = (amountAfterFee * supply) / balanceBefore;
         }
 
         require(shares != 0, "ZERO_SHARES_MINTED");
 
-        token.safeTransferFrom(msg.sender, address(this), _amount);
+        ERC20Upgradeable _token = token;
+
+        if (depositFee != 0)
+            _token.safeTransferFrom(msg.sender, feeRecipient, depositFee);
+        _token.safeTransferFrom(msg.sender, address(_strategy), amountAfterFee);
         _mint(msg.sender, shares);
 
-        emit Deposit(msg.sender, _amount);
+        _strategy.deposit();
+
+        emit Deposit(msg.sender, amountAfterFee);
     }
 
-    /// @notice Allows users to withdraw all their deposited balance
-    function withdrawAll() external {
-        withdraw(balanceOf(msg.sender));
+    /// @notice Allows anyone to deposit want tokens from this contract to the strategy.
+    function depositBalance() external {
+        IStrategy _strategy = strategy;
+        require(address(_strategy) != address(0), "NO_STRATEGY");
+
+        ERC20Upgradeable _token = token;
+
+        uint256 balance = _token.balanceOf(address(this));
+        require(balance > 0, "NO_BALANCE");
+
+        _token.safeTransfer(address(_strategy), balance);
+
+        _strategy.deposit();
     }
 
     /// @notice Allows users to withdraw tokens. Contracts can't call this function
     /// @param _shares The amount of shares to burn
-    function withdraw(uint256 _shares) public noContract {
+    function withdraw(uint256 _shares)
+        external
+        noContract
+        whenNotPaused
+        returns (uint256 backingTokens)
+    {
         require(_shares != 0, "INVALID_AMOUNT");
 
         uint256 supply = totalSupply();
         require(supply != 0, "NO_TOKENS_DEPOSITED");
 
-        uint256 backingTokens = (balance() * _shares) / supply;
+        uint256 assets = totalAssets();
+        backingTokens = (assets * _shares) / supply;
         _burn(msg.sender, _shares);
 
-        ERC20 _token = token;
+        ERC20Upgradeable _token = token;
         // Check balance
         uint256 vaultBalance = _token.balanceOf(address(this));
-        if (vaultBalance < backingTokens) {
-            uint256 toWithdraw;
-            unchecked {
-                toWithdraw = backingTokens - vaultBalance;
+        if (vaultBalance >= backingTokens) {
+            _token.safeTransfer(msg.sender, backingTokens);
+        } else {
+            IStrategy _strategy = strategy;
+            assert(address(_strategy) != address(0));
+
+            if (assets - vaultBalance >= backingTokens) {
+                _strategy.withdraw(msg.sender, backingTokens);
+            } else {
+                _token.safeTransfer(msg.sender, vaultBalance);
+                _strategy.withdraw(msg.sender, backingTokens - vaultBalance);
             }
-            controller.withdraw(address(_token), toWithdraw);
         }
 
-        _token.safeTransfer(msg.sender, backingTokens);
         emit Withdrawal(msg.sender, backingTokens);
     }
 
-    /// @return The underlying tokens per share
-    function getPricePerFullShare() external view returns (uint256) {
-        uint256 supply = totalSupply();
-        if (supply == 0) return 0;
-        return (balance() * 1e18) / supply;
+    /// @notice Allows the owner to migrate strategies.
+    /// @param _newStrategy The new strategy. Can be `address(0)`
+    function migrateStrategy(IStrategy _newStrategy) external onlyOwner {
+        IStrategy _strategy = strategy;
+        require(_newStrategy != _strategy, "SAME_STRATEGY");
+
+        if (address(_strategy) != address(0)) {
+            _strategy.withdrawAll();
+        }
+        if (address(_newStrategy) != address(0)) {
+            uint256 balance = token.balanceOf(address(this));
+            if (balance > 0) {
+                token.safeTransfer(address(_newStrategy), balance);
+                _newStrategy.deposit();
+            }
+        }
+
+        strategy = _newStrategy;
+
+        emit StrategyMigrated(_newStrategy, _strategy);
+    }
+
+    /// @notice Allows the owner to change fee recipient
+    /// @param _newAddress The new fee recipient
+    function setFeeRecipient(address _newAddress) public onlyOwner {
+        require(_newAddress != address(0), "INVALID_ADDRESS");
+
+        emit FeeRecipientChanged(_newAddress, feeRecipient);
+
+        feeRecipient = _newAddress;
+    }
+
+    /// @notice Allows the owner to set the deposit fee rate
+    /// @param _rate The new rate
+    function setDepositFeeRate(Rate memory _rate) public onlyOwner {
+        require(
+            _rate.denominator != 0 && _rate.denominator > _rate.numerator,
+            "INVALID_RATE"
+        );
+        depositFeeRate = _rate;
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     /// @dev Prevent the owner from renouncing ownership. Having no owner would render this contract unusable due to the inability to create new epochs
