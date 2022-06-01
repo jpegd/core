@@ -3,7 +3,6 @@ pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import "../interfaces/IController.sol";
 import "../interfaces/IStrategy.sol";
 
 contract MockStrategy is IStrategy {

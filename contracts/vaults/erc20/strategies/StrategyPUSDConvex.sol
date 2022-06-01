@@ -11,7 +11,6 @@ import "../../../interfaces/I3CRVZap.sol";
 import "../../../interfaces/IBooster.sol";
 import "../../../interfaces/IBaseRewardPool.sol";
 
-import "../../../interfaces/IController.sol";
 import "../../../interfaces/IFungibleAssetVaultForDAO.sol";
 
 import "../../../interfaces/IStrategy.sol";
