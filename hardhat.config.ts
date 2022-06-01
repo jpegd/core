@@ -23,6 +23,8 @@ import "./deploy/12_configure_EtherRocksHelper";
 import "./deploy/13_deploy_FungibleAssetVaultForDAO";
 import "./deploy/14_deploy_JPEGDLPFarming";
 import "./deploy/15_transferOwnership";
+import "./deploy/16_deploy_Vault";
+import "./deploy/17_deploy_StrategyPUSDConvex";
 
 dotenv.config();
 
@@ -36,7 +38,7 @@ module.exports = {
     hardhat: {
       forking: {
         url: "https://eth-mainnet.alchemyapi.io/v2/" + process.env.ALCHEMY_API_KEY,
-        blockNumber: 13652630
+        blockNumber: 14878741
       }
     },
     kovan: {
