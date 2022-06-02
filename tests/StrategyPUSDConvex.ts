@@ -267,22 +267,22 @@ describe("StrategyPUSDConvex", () => {
     await want.transfer(user.address, units(500));
     await want.connect(user).approve(vault.address, units(500));
 
-    await vault.connect(user).deposit(units(500));
+    await vault.connect(user).deposit(user.address, units(500));
     expect(await strategy.depositedAssets()).to.equal(units(500));
 
     await want.transfer(strategy.address, units(500));
 
-    await vault.connect(user).withdraw(units(250));
+    await vault.connect(user).withdraw(user.address, units(250));
     expect(await want.balanceOf(user.address)).to.equal(units(500));
 
-    await vault.connect(user).withdraw(units(250));
+    await vault.connect(user).withdraw(user.address, units(250));
     expect(await want.balanceOf(user.address)).to.equal(units(1000));
   });
 
   it("should allow the vault to call withdrawAll", async () => {
     await want.approve(vault.address, units(500));
 
-    await vault.deposit(units(500));
+    await vault.deposit(owner._address, units(500));
 
     await expect(strategy.withdrawAll()).to.be.revertedWith(
       "NOT_VAULT"
@@ -310,7 +310,7 @@ describe("StrategyPUSDConvex", () => {
 
     const ownerWantBalance = await want.balanceOf(owner._address);
     await want.approve(vault.address, ownerWantBalance);
-    await vault.deposit(ownerWantBalance);
+    await vault.deposit(owner._address, ownerWantBalance);
 
     expect(await strategy.depositedAssets()).to.equal(ownerWantBalance);
 
@@ -362,7 +362,7 @@ describe("StrategyPUSDConvex", () => {
 
     const ownerWantBalance = await want.balanceOf(owner._address);
     await want.approve(vault.address, ownerWantBalance);
-    await vault.deposit(ownerWantBalance);
+    await vault.deposit(owner._address, ownerWantBalance);
 
     expect(await strategy.depositedAssets()).to.equal(ownerWantBalance);
 

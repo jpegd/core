@@ -14,8 +14,8 @@ import "../../interfaces/IStrategy.sol";
 contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
     using SafeERC20Upgradeable for ERC20Upgradeable;
 
-    event Deposit(address indexed from, uint256 value);
-    event Withdrawal(address indexed withdrawer, uint256 wantAmount);
+    event Deposit(address indexed from, address indexed to, uint256 value);
+    event Withdrawal(address indexed withdrawer, address indexed to, uint256 wantAmount);
     event StrategyMigrated(
         IStrategy indexed newStrategy,
         IStrategy indexed oldStrategy
@@ -79,8 +79,9 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
     }
 
     /// @notice Allows users to deposit `token`. Contracts can't call this function
+    /// @param _to The address to send the tokens to
     /// @param _amount The amount to deposit
-    function deposit(uint256 _amount)
+    function deposit(address _to, uint256 _amount)
         external
         noContract
         whenNotPaused
@@ -112,11 +113,11 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
         if (depositFee != 0)
             _token.safeTransferFrom(msg.sender, feeRecipient, depositFee);
         _token.safeTransferFrom(msg.sender, address(_strategy), amountAfterFee);
-        _mint(msg.sender, shares);
+        _mint(_to, shares);
 
         _strategy.deposit();
 
-        emit Deposit(msg.sender, amountAfterFee);
+        emit Deposit(msg.sender, _to, amountAfterFee);
     }
 
     /// @notice Allows anyone to deposit want tokens from this contract to the strategy.
@@ -135,8 +136,9 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
     }
 
     /// @notice Allows users to withdraw tokens. Contracts can't call this function
+    /// @param _to The address to send the tokens to
     /// @param _shares The amount of shares to burn
-    function withdraw(uint256 _shares)
+    function withdraw(address _to, uint256 _shares)
         external
         noContract
         whenNotPaused
@@ -155,20 +157,20 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
         // Check balance
         uint256 vaultBalance = _token.balanceOf(address(this));
         if (vaultBalance >= backingTokens) {
-            _token.safeTransfer(msg.sender, backingTokens);
+            _token.safeTransfer(_to, backingTokens);
         } else {
             IStrategy _strategy = strategy;
             assert(address(_strategy) != address(0));
 
             if (assets - vaultBalance >= backingTokens) {
-                _strategy.withdraw(msg.sender, backingTokens);
+                _strategy.withdraw(_to, backingTokens);
             } else {
-                _token.safeTransfer(msg.sender, vaultBalance);
-                _strategy.withdraw(msg.sender, backingTokens - vaultBalance);
+                _token.safeTransfer(_to, vaultBalance);
+                _strategy.withdraw(_to, backingTokens - vaultBalance);
             }
         }
 
-        emit Withdrawal(msg.sender, backingTokens);
+        emit Withdrawal(msg.sender, _to, backingTokens);
     }
 
     /// @notice Allows the owner to migrate strategies.

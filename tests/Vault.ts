@@ -70,18 +70,18 @@ describe("Vault", () => {
     await want.mint(user1.address, units(1000));
     await want.connect(user1).approve(vault.address, units(1000));
 
-    await expect(vault.connect(user1).deposit(0)).to.be.revertedWith(
+    await expect(vault.connect(user1).deposit(user1.address, 0)).to.be.revertedWith(
       "INVALID_AMOUNT"
     );
 
-    await expect(vault.connect(user1).deposit(units(500))).to.be.revertedWith("NO_STRATEGY");
+    await expect(vault.connect(user1).deposit(user1.address, units(500))).to.be.revertedWith("NO_STRATEGY");
 
     await vault.migrateStrategy(strategy.address);
 
-    await vault.connect(user1).deposit(units(500));
+    await vault.connect(user1).deposit(user1.address, units(500));
 
     expect(await vault.balanceOf(user1.address)).to.equal(units(497.5));
-    await vault.connect(user1).deposit(units(500));
+    await vault.connect(user1).deposit(user1.address, units(500));
     expect(await vault.balanceOf(user1.address)).to.equal(units(995));
     
     expect(await want.balanceOf(owner.address)).to.equal(units(5));
@@ -97,21 +97,21 @@ describe("Vault", () => {
     await want.mint(user1.address, units(1000));
     await want.connect(user1).approve(vault.address, units(1000));
 
-    await vault.connect(user1).deposit(units(500));
+    await vault.connect(user1).deposit(user1.address, units(500));
     expect(await vault.balanceOf(user1.address)).to.equal(units(497.5));
 
     await want.mint(vault.address, units(497.5));
 
     expect(await vault.exchangeRate()).to.equal(units(2));
 
-    await vault.connect(user1).deposit(units(500));
+    await vault.connect(user1).deposit(user1.address, units(500));
     expect(await vault.balanceOf(user1.address)).to.equal(units(746.25));
 
     expect(await want.balanceOf(owner.address)).to.equal(units(5));
     expect(await want.balanceOf(strategy.address)).to.equal(units(995));
     expect(await want.balanceOf(vault.address)).to.equal(units(497.5));
 
-    await vault.connect(user1).withdraw(units(746.25));
+    await vault.connect(user1).withdraw(user1.address, units(746.25));
     expect(await want.balanceOf(strategy.address)).to.equal(units(0));
     expect(await want.balanceOf(vault.address)).to.equal(units(0));
     expect(await want.balanceOf(user1.address)).to.equal(units(1492.5));
@@ -126,26 +126,26 @@ describe("Vault", () => {
     await want.mint(user1.address, units(1000));
     await want.connect(user1).approve(vault.address, units(1000));
 
-    await expect(vault.connect(user1).withdraw(0)).to.be.revertedWith(
+    await expect(vault.connect(user1).withdraw(user1.address, 0)).to.be.revertedWith(
       "INVALID_AMOUNT"
     );
-    await expect(vault.connect(user1).withdraw(units(500))).to.be.revertedWith(
+    await expect(vault.connect(user1).withdraw(user1.address, units(500))).to.be.revertedWith(
       "NO_TOKENS_DEPOSITED"
     );
 
-    await vault.connect(user1).deposit(units(1000));
+    await vault.connect(user1).deposit(user1.address, units(1000));
 
-    await vault.connect(user1).withdraw(units(500));
+    await vault.connect(user1).withdraw(user1.address, units(500));
     expect(await want.balanceOf(user1.address)).to.equal(units(500));
 
     await want.mint(vault.address, units(495));
     await vault.depositBalance();
 
-    await vault.connect(user1).withdraw(units(250));
+    await vault.connect(user1).withdraw(user1.address, units(250));
     expect(await want.balanceOf(user1.address)).to.equal(units(1000));
     expect(await want.balanceOf(strategy.address)).to.equal(units(490));
 
-    await vault.connect(user1).withdraw(units(245));
+    await vault.connect(user1).withdraw(user1.address, units(245));
     expect(await want.balanceOf(user1.address)).to.equal(units(1490));
     expect(await want.balanceOf(strategy.address)).to.equal(0);
     expect(await want.balanceOf(owner.address)).to.equal(units(5));
@@ -158,7 +158,7 @@ describe("Vault", () => {
 
     await want.mint(user1.address, units(1000));
     await want.connect(user1).approve(vault.address, units(1000));
-    await vault.connect(user1).deposit(units(1000));
+    await vault.connect(user1).deposit(user1.address, units(1000));
 
     await expect(vault.migrateStrategy(strategy.address)).to.be.revertedWith("SAME_STRATEGY");
 
@@ -175,7 +175,7 @@ describe("Vault", () => {
     expect(await want.balanceOf(strategy.address)).to.equal(0);
     expect(await want.balanceOf(newStrategy.address)).to.equal(units(995));
 
-    await vault.connect(user1).withdraw(units(495));
+    await vault.connect(user1).withdraw(user1.address, units(495));
     expect(await want.balanceOf(user1.address)).to.equal(units(495));
 
     await vault.migrateStrategy(ZERO_ADDRESS);
@@ -185,9 +185,9 @@ describe("Vault", () => {
     expect(await want.balanceOf(strategy.address)).to.equal(0);
     expect(await want.balanceOf(newStrategy.address)).to.equal(0);
 
-    await expect(vault.connect(user1).deposit(units(500))).to.be.revertedWith("NO_STRATEGY");
+    await expect(vault.connect(user1).deposit(user1.address, units(500))).to.be.revertedWith("NO_STRATEGY");
 
-    await vault.connect(user1).withdraw(units(500));
+    await vault.connect(user1).withdraw(user1.address, units(500));
     expect(await vault.totalAssets()).to.equal(0);
     expect(await vault.totalSupply()).to.equal(0);
     expect(await want.balanceOf(user1.address)).to.equal(units(995));
