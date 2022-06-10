@@ -9,7 +9,6 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
-import "../interfaces/IJPEGLock.sol";
 import "../interfaces/IJPEGCardsCigStaking.sol";
 
 /// @title NFT lending vault
@@ -22,6 +21,24 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using SafeERC20Upgradeable for IStableCoin;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
+
+    error InvalidNFT(uint256 nftIndex);
+    error InvalidRate(Rate rate);
+    error InvalidNFTType(bytes32 nftType);
+    error InvalidUnlockTime(uint256 unlockTime);
+    error InvalidAmount(uint256 amount);
+    error InvalidPosition(uint256 nftIndex);
+    error PositionLiquidated(uint256 nftIndex);
+    error Unauthorized();
+    error DebtCapReached();
+    error InvalidInsuranceMode();
+    error NoDebt();
+    error NonZeroDebt(uint256 debtAmount);
+    error PositionInsuranceExpired(uint256 nftIndex);
+    error PositionInsuranceNotExpired(uint256 nftIndex);
+    error ZeroAddress();
+    error InvalidOracleResults();
+    error NoOracleSet();
 
     event PositionOpened(address indexed owner, uint256 indexed index);
     event Borrowed(
@@ -40,6 +57,17 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     event Repurchased(address indexed owner, uint256 indexed index);
     event InsuranceExpired(address indexed owner, uint256 indexed index);
     event DaoFloorChanged(uint256 newFloor);
+    event JPEGLocked(
+        address indexed owner,
+        uint256 indexed index,
+        uint256 amount,
+        uint256 unlockTime
+    );
+    event JPEGUnlocked(
+        address indexed owner,
+        uint256 indexed index,
+        uint256 amount
+    );
 
     enum BorrowType {
         NOT_CONFIRMED,
@@ -61,6 +89,12 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint128 denominator;
     }
 
+    struct JPEGLock {
+        address owner;
+        uint256 unlockAt;
+        uint256 lockedValue;
+    }
+
     struct VaultSettings {
         Rate debtInterestApr;
         Rate creditLimitRate;
@@ -75,10 +109,20 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 borrowAmountCap;
     }
 
-    bytes32 public constant DAO_ROLE = keccak256("DAO_ROLE");
-    bytes32 public constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
+    bytes32 private constant DAO_ROLE = keccak256("DAO_ROLE");
+    bytes32 private constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
+    bytes32 private constant SETTER_ROLE = keccak256("SETTER_ROLE");
 
-    bytes32 public constant CUSTOM_NFT_HASH = keccak256("CUSTOM");
+    //accrue required
+    uint8 private constant ACTION_BORROW = 0;
+    uint8 private constant ACTION_REPAY = 1;
+    uint8 private constant ACTION_CLOSE_POSITION = 2;
+    uint8 private constant ACTION_LIQUIDATE = 3;
+    //no accrue required
+    uint8 private constant ACTION_REPURCHASE = 100;
+    uint8 private constant ACTION_CLAIM_NFT = 101;
+    uint8 private constant ACTION_TRAIT_BOOST = 102;
+    uint8 private constant ACTION_UNLOCK_JPEG = 103;
 
     IStableCoin public stablecoin;
     /// @notice Chainlink ETH/USD price feed
@@ -89,8 +133,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     IAggregatorV3Interface public floorOracle;
     /// @notice Chainlink NFT fallback floor oracle
     IAggregatorV3Interface public fallbackOracle;
-    /// @notice JPEGLocker, used by this contract to lock JPEG and increase the value of an NFT
-    IJPEGLock public jpegLocker;
+    /// @notice The JPEG token
+    /// @custom:oz-renamed-from jpegLocker
+    IERC20Upgradeable public jpeg;
     /// @notice JPEGCardsCigStaking, cig stakers get an higher credit limit rate and liquidation limit rate.
     /// Immediately reverts to normal rates if the cig is unstaked.
     IJPEGCardsCigStaking public cigStaking;
@@ -104,34 +149,44 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Total outstanding debt
     uint256 public totalDebtAmount;
     /// @dev Last time debt was accrued. See {accrue} for more info
-    uint256 public totalDebtAccruedAt;
+    uint256 private totalDebtAccruedAt;
     uint256 public totalFeeCollected;
-    uint256 internal totalDebtPortion;
+    uint256 private totalDebtPortion;
 
     VaultSettings public settings;
 
     /// @dev Keeps track of all the NFTs used as collateral for positions
     EnumerableSetUpgradeable.UintSet private positionIndexes;
 
-    mapping(uint256 => Position) private positions;
+    mapping(uint256 => Position) public positions;
     mapping(uint256 => address) public positionOwner;
-    mapping(bytes32 => uint256) public nftTypeValueETH;
-    mapping(uint256 => uint256) public nftValueETH;
+    /// @custom:oz-renamed-from nftTypeValueETH
+    mapping(bytes32 => uint256) private unused1; //unused after upgrade
+    /// @custom:oz-renamed-from nftValueETH
+    mapping(uint256 => uint256) private unused2; //unused after upgrade
     //bytes32(0) is floor
     mapping(uint256 => bytes32) public nftTypes;
-    mapping(uint256 => uint256) public pendingNFTValueETH;
+
+    /// @notice Value of floor set by the DAO. Only used if `daoFloorOverride` is true
+    uint256 private overriddenFloorValueETH;
+
+    /// @notice The trait value multiplier for non floor NFTs. See {applyTraitBoost} for more info.
+    mapping(bytes32 => Rate) public nftTypeValueMultiplier;
+    /// @notice The JPEG locks. See {applyTraitBoost} for more info.
+    mapping(uint256 => JPEGLock) public lockPositions;
 
     /// @dev Checks if the provided NFT index is valid
     /// @param nftIndex The index to check
     modifier validNFTIndex(uint256 nftIndex) {
         //The standard OZ ERC721 implementation of ownerOf reverts on a non existing nft isntead of returning address(0)
-        require(nftContract.ownerOf(nftIndex) != address(0), "invalid_nft");
+        if (nftContract.ownerOf(nftIndex) == address(0))
+            revert InvalidNFT(nftIndex);
         _;
     }
 
     struct NFTCategoryInitializer {
         bytes32 hash;
-        uint256 valueETH;
+        Rate valueMultiplier;
         uint256[] nfts;
     }
 
@@ -145,6 +200,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _settings Initial settings used by the contract
     function initialize(
         IStableCoin _stablecoin,
+        IERC20Upgradeable _jpeg,
         IERC721Upgradeable _nftContract,
         IAggregatorV3Interface _ethAggregator,
         IAggregatorV3Interface _floorOracle,
@@ -157,49 +213,49 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         _setupRole(DAO_ROLE, msg.sender);
         _setRoleAdmin(LIQUIDATOR_ROLE, DAO_ROLE);
+        _setRoleAdmin(SETTER_ROLE, DAO_ROLE);
         _setRoleAdmin(DAO_ROLE, DAO_ROLE);
 
-        _validateRate(_settings.debtInterestApr);
-        _validateRate(_settings.creditLimitRate);
-        _validateRate(_settings.liquidationLimitRate);
-        _validateRate(_settings.cigStakedCreditLimitRate);
-        _validateRate(_settings.cigStakedLiquidationLimitRate);
-        _validateRate(_settings.valueIncreaseLockRate);
-        _validateRate(_settings.organizationFeeRate);
-        _validateRate(_settings.insurancePurchaseRate);
-        _validateRate(_settings.insuranceLiquidationPenaltyRate);
+        _validateRateBelowOne(_settings.debtInterestApr);
+        _validateRateBelowOne(_settings.creditLimitRate);
+        _validateRateBelowOne(_settings.liquidationLimitRate);
+        _validateRateBelowOne(_settings.cigStakedCreditLimitRate);
+        _validateRateBelowOne(_settings.cigStakedLiquidationLimitRate);
+        _validateRateBelowOne(_settings.valueIncreaseLockRate);
+        _validateRateBelowOne(_settings.organizationFeeRate);
+        _validateRateBelowOne(_settings.insurancePurchaseRate);
+        _validateRateBelowOne(_settings.insuranceLiquidationPenaltyRate);
 
-        require(
-            _greaterThan(
+        if (
+            !_greaterThan(
                 _settings.liquidationLimitRate,
                 _settings.creditLimitRate
-            ),
-            "invalid_liquidation_limit"
-        );
-        require(
-            _greaterThan(
+            )
+        ) revert InvalidRate(_settings.liquidationLimitRate);
+
+        if (
+            !_greaterThan(
                 _settings.cigStakedLiquidationLimitRate,
                 _settings.cigStakedCreditLimitRate
-            ),
-            "invalid_cig_liquidation_limit"
-        );
+            )
+        ) revert InvalidRate(_settings.cigStakedLiquidationLimitRate);
 
-        require(
-            _greaterThan(
+        if (
+            !_greaterThan(
                 _settings.cigStakedCreditLimitRate,
                 _settings.creditLimitRate
-            ),
-            "invalid_cig_credit_limit"
-        );
-        require(
-            _greaterThan(
+            )
+        ) revert InvalidRate(_settings.cigStakedCreditLimitRate);
+
+        if (
+            !_greaterThan(
                 _settings.cigStakedLiquidationLimitRate,
                 _settings.liquidationLimitRate
-            ),
-            "invalid_cig_liquidation_limit"
-        );
+            )
+        ) revert InvalidRate(_settings.cigStakedLiquidationLimitRate);
 
         stablecoin = _stablecoin;
+        jpeg = _jpeg;
         ethAggregator = _ethAggregator;
         floorOracle = _floorOracle;
         cigStaking = _cigStaking;
@@ -210,11 +266,131 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         //initializing the categories
         for (uint256 i; i < _typeInitializers.length; ++i) {
             NFTCategoryInitializer memory initializer = _typeInitializers[i];
-            nftTypeValueETH[initializer.hash] = initializer.valueETH;
+            if (initializer.hash == bytes32(0))
+                revert InvalidNFTType(initializer.hash);
+            _validateRateAboveOne(initializer.valueMultiplier);
+            nftTypeValueMultiplier[initializer.hash] = initializer
+                .valueMultiplier;
             for (uint256 j; j < initializer.nfts.length; j++) {
                 nftTypes[initializer.nfts[j]] = initializer.hash;
             }
         }
+    }
+
+    /// @dev Function called by the {ProxyAdmin} contract during the upgrade process.
+    /// Sets the JPEG token address, migrates overridden floor to the new `overriddenFloorValueETH` variable,
+    /// clears the `unused1` mapping and sets `DAO_ROLE` as admin for the `SETTER_ROLE`.
+    function finalizeUpgrade(IERC20Upgradeable _jpeg, bytes32[] memory _toClear)
+        external
+    {
+        require(address(jpeg) == address(0)); //already finalized
+        if (address(_jpeg) == address(0)) revert ZeroAddress();
+
+        _setRoleAdmin(SETTER_ROLE, DAO_ROLE);
+
+        jpeg = _jpeg;
+        overriddenFloorValueETH = unused1[bytes32(0)];
+
+        for (uint256 i; i < _toClear.length; ++i) {
+            delete unused1[_toClear[i]];
+        }
+    }
+
+    /// @notice Returns the number of open positions
+    /// @return The number of open positions
+    function totalPositions() external view returns (uint256) {
+        return positionIndexes.length();
+    }
+
+    /// @notice Returns all open position NFT indexes
+    /// @return The open position NFT indexes
+    function openPositionsIndexes() external view returns (uint256[] memory) {
+        return positionIndexes.values();
+    }
+
+    /// @param _nftIndex The NFT to return the value of
+    /// @return The value in ETH of the NFT at index `_nftIndex`, with 18 decimals.
+    function getNFTValueETH(uint256 _nftIndex) public view returns (uint256) {
+        uint256 floor = getFloorETH();
+
+        bytes32 nftType = nftTypes[_nftIndex];
+        if (
+            nftType != bytes32(0) &&
+            lockPositions[_nftIndex].unlockAt > block.timestamp
+        ) {
+            Rate memory multiplier = nftTypeValueMultiplier[nftType];
+            return (floor * multiplier.numerator) / multiplier.denominator;
+        } else return floor;
+    }
+
+    /// @param _nftIndex The NFT to return the value of
+    /// @return The value in USD of the NFT at index `_nftIndex`, with 18 decimals.
+    function getNFTValueUSD(uint256 _nftIndex) public view returns (uint256) {
+        uint256 nftValue = getNFTValueETH(_nftIndex);
+        return (nftValue * _ethPriceUSD()) / 1 ether;
+    }
+
+    /// @param _nftIndex The NFT to return the credit limit of
+    /// @return The PUSD credit limit of the NFT at index `_nftIndex`.
+    function getCreditLimit(uint256 _nftIndex) external view returns (uint256) {
+        return _getCreditLimit(positionOwner[_nftIndex], _nftIndex);
+    }
+
+    /// @param _nftIndex The NFT to return the liquidation limit of
+    /// @return The PUSD liquidation limit of the NFT at index `_nftIndex`.
+    function getLiquidationLimit(uint256 _nftIndex)
+        public
+        view
+        returns (uint256)
+    {
+        return _getLiquidationLimit(positionOwner[_nftIndex], _nftIndex);
+    }
+
+    /// @param _nftIndex The NFT to check
+    /// @return Whether the NFT at index `_nftIndex` is liquidatable.
+    function isLiquidatable(uint256 _nftIndex) external view returns (bool) {
+        Position storage position = positions[_nftIndex];
+        if (position.borrowType == BorrowType.NOT_CONFIRMED) return false;
+        if (position.liquidatedAt > 0) return false;
+
+        uint256 principal = position.debtPrincipal;
+        return
+            principal + getDebtInterest(_nftIndex) >=
+            getLiquidationLimit(_nftIndex);
+    }
+
+    /// @param _nftIndex The NFT to check
+    /// @return The PUSD debt interest accumulated by the NFT at index `_nftIndex`.
+    function getDebtInterest(uint256 _nftIndex) public view returns (uint256) {
+        Position storage position = positions[_nftIndex];
+        uint256 principal = position.debtPrincipal;
+        uint256 debt = position.liquidatedAt != 0
+            ? position.debtAmountForRepurchase
+            : _calculateDebt(
+                totalDebtAmount + _calculateAdditionalInterest(),
+                position.debtPortion,
+                totalDebtPortion
+            );
+
+        //_calculateDebt is prone to rounding errors that may cause
+        //the calculated debt amount to be 1 or 2 units less than
+        //the debt principal if no time has elapsed in between the first borrow
+        //and the _calculateDebt call.
+        if (principal > debt) debt = principal;
+
+        unchecked {
+            return debt - principal;
+        }
+    }
+
+    /// @return The floor value for the collection, in ETH.
+    function getFloorETH() public view returns (uint256) {
+        if (daoFloorOverride) return overriddenFloorValueETH;
+        else
+            return
+                _normalizeAggregatorAnswer(
+                    useFallbackOracle ? fallbackOracle : floorOracle
+                );
     }
 
     /// @dev The {accrue} function updates the contract's state by calculating
@@ -228,143 +404,179 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totalFeeCollected += additionalInterest;
     }
 
-    /// @notice Allows the DAO to change the total debt cap
-    /// @param _borrowAmountCap New total debt cap
-    function setBorrowAmountCap(uint256 _borrowAmountCap)
+    /// @notice Allows to execute multiple actions in a single transaction.
+    /// @param _actions The actions to execute.
+    /// @param _datas The abi encoded parameters for the actions to execute. 
+    function doActions(uint8[] calldata _actions, bytes[] calldata _datas)
         external
-        onlyRole(DAO_ROLE)
+        nonReentrant
     {
-        settings.borrowAmountCap = _borrowAmountCap;
+        bool accrueCalled;
+        for (uint256 i; i < _actions.length; ++i) {
+            uint8 action = _actions[i];
+            if (!accrueCalled && action < 100) {
+                accrue();
+                accrueCalled = true;
+            }
+
+            if (action == ACTION_BORROW) {
+                (uint256 nftIndex, uint256 amount, bool useInsurance) = abi
+                    .decode(_datas[i], (uint256, uint256, bool));
+                _borrow(nftIndex, amount, useInsurance);
+            } else if (action == ACTION_REPAY) {
+                (uint256 nftIndex, uint256 amount) = abi.decode(
+                    _datas[i],
+                    (uint256, uint256)
+                );
+                _repay(nftIndex, amount);
+            } else if (action == ACTION_CLOSE_POSITION) {
+                uint256 nftIndex = abi.decode(_datas[i], (uint256));
+                _closePosition(nftIndex);
+            } else if (action == ACTION_LIQUIDATE) {
+                (uint256 nftIndex, address recipient) = abi.decode(
+                    _datas[i],
+                    (uint256, address)
+                );
+                _liquidate(nftIndex, recipient);
+            } else if (action == ACTION_REPURCHASE) {
+                uint256 nftIndex = abi.decode(_datas[i], (uint256));
+                _repurchase(nftIndex);
+            } else if (action == ACTION_CLAIM_NFT) {
+                (uint256 nftIndex, address recipient) = abi.decode(
+                    _datas[i],
+                    (uint256, address)
+                );
+                _claimExpiredInsuranceNFT(nftIndex, recipient);
+            } else if (action == ACTION_TRAIT_BOOST) {
+                (uint256 nftIndex, uint256 unlockAt) = abi.decode(
+                    _datas[i],
+                    (uint256, uint256)
+                );
+                _applyTraitBoost(nftIndex, unlockAt);
+            } else if (action == ACTION_UNLOCK_JPEG) {
+                uint256 nftIndex = abi.decode(_datas[i], (uint256));
+                _unlockJPEG(nftIndex);
+            }
+        }
     }
 
-    /// @notice Allows the DAO to change the interest APR on borrows
-    /// @param _debtInterestApr The new interest rate
-    function setDebtInterestApr(Rate calldata _debtInterestApr)
+    /// @notice Allows users to lock JPEG tokens to unlock the trait boost for a single non floor NFT.
+    /// The trait boost is a multiplicative value increase relative to the collection's floor.
+    /// The value increase depends on the NFT's traits and it's set by the DAO.
+    /// The ETH value of the JPEG to lock is calculated by applying the `valueIncreaseLockRate` rate to the NFT's new credit limit.
+    /// The unlock time is set by the user and has to be greater than `block.timestamp` and the previous unlock time.
+    /// After the lock expires, the boost is revoked and the NFT's value goes back to floor.
+    /// If a boosted position is closed or liquidated, the JPEG remains locked and the boost will still be applied in case the NFT
+    /// is deposited again, even in case of a different owner. The locked JPEG will only be claimable by the original lock creator
+    /// once the lock expires. If the lock is renewed by the new owner, the JPEG from the previous lock will be sent back to the original
+    /// lock creator.
+    /// @dev emits a {JPEGLocked} event
+    /// @param _nftIndex The index of the NFT to boost (has to be a non floor NFT)
+    /// @param _unlockAt The lock expiration time.
+    function applyTraitBoost(uint256 _nftIndex, uint256 _unlockAt)
         external
-        onlyRole(DAO_ROLE)
+        nonReentrant
     {
-        _validateRate(_debtInterestApr);
+        _applyTraitBoost(_nftIndex, _unlockAt);
+    }
 
+    /// @notice Allows lock creators to unlock the JPEG associated to the NFT at index `_nftIndex`, provided the lock expired.
+    /// @dev emits a {JPEGUnlocked} event
+    /// @param _nftIndex The index of the NFT holding the lock.
+    function unlockJPEG(uint256 _nftIndex) external nonReentrant {
+        _unlockJPEG(_nftIndex);
+    }
+
+    /// @notice Allows users to open positions and borrow using an NFT
+    /// @dev emits a {Borrowed} event
+    /// @param _nftIndex The index of the NFT to be used as collateral
+    /// @param _amount The amount of PUSD to be borrowed. Note that the user will receive less than the amount requested,
+    /// the borrow fee and insurance automatically get removed from the amount borrowed
+    /// @param _useInsurance Whereter to open an insured position. In case the position has already been opened previously,
+    /// this parameter needs to match the previous insurance mode. To change insurance mode, a user needs to close and reopen the position
+    function borrow(
+        uint256 _nftIndex,
+        uint256 _amount,
+        bool _useInsurance
+    ) external nonReentrant {
         accrue();
-
-        settings.debtInterestApr = _debtInterestApr;
+        _borrow(_nftIndex, _amount, _useInsurance);
     }
 
-    /// @notice Allows the DAO to change the amount of JPEG needed to increase the value of an NFT relative to the desired value
-    /// @param _valueIncreaseLockRate The new rate
-    function setValueIncreaseLockRate(Rate calldata _valueIncreaseLockRate)
+    /// @notice Allows users to repay a portion/all of their debt. Note that since interest increases every second,
+    /// a user wanting to repay all of their debt should repay for an amount greater than their current debt to account for the
+    /// additional interest while the repay transaction is pending, the contract will only take what's necessary to repay all the debt
+    /// @dev Emits a {Repaid} event
+    /// @param _nftIndex The NFT used as collateral for the position
+    /// @param _amount The amount of debt to repay. If greater than the position's outstanding debt, only the amount necessary to repay all the debt will be taken
+    function repay(uint256 _nftIndex, uint256 _amount) external nonReentrant {
+        accrue();
+        _repay(_nftIndex, _amount);
+    }
+
+    /// @notice Allows a user to close a position and get their collateral back, if the position's outstanding debt is 0
+    /// @dev Emits a {PositionClosed} event
+    /// @param _nftIndex The index of the NFT used as collateral
+    function closePosition(uint256 _nftIndex) external nonReentrant {
+        accrue();
+        _closePosition(_nftIndex);
+    }
+
+    /// @notice Allows members of the `LIQUIDATOR_ROLE` to liquidate a position. Positions can only be liquidated
+    /// once their debt amount exceeds the minimum liquidation debt to collateral value rate.
+    /// In order to liquidate a position, the liquidator needs to repay the user's outstanding debt.
+    /// If the position is not insured, it's closed immediately and the collateral is sent to `_recipient`.
+    /// If the position is insured, the position remains open (interest doesn't increase) and the owner of the position has a certain amount of time
+    /// (`insuranceRepurchaseTimeLimit`) to fully repay the liquidator and pay an additional liquidation fee (`insuranceLiquidationPenaltyRate`), if this
+    /// is done in time the user gets back their collateral and their position is automatically closed. If the user doesn't repurchase their collateral
+    /// before the time limit passes, the liquidator can claim the liquidated NFT and the position is closed
+    /// @dev Emits a {Liquidated} event
+    /// @param _nftIndex The NFT to liquidate
+    /// @param _recipient The address to send the NFT to
+    function liquidate(uint256 _nftIndex, address _recipient)
         external
-        onlyRole(DAO_ROLE)
+        nonReentrant
     {
-        _validateRate(_valueIncreaseLockRate);
-        settings.valueIncreaseLockRate = _valueIncreaseLockRate;
+        accrue();
+        _liquidate(_nftIndex, _recipient);
     }
 
-    /// @notice Allows the DAO to change the max debt to collateral rate for a position
-    /// @param _creditLimitRate The new rate
-    function setCreditLimitRate(Rate calldata _creditLimitRate)
+    /// @notice Allows liquidated users who purchased insurance to repurchase their collateral within the time limit
+    /// defined with the `insuranceRepurchaseTimeLimit`. The user needs to pay the liquidator the total amount of debt
+    /// the position had at the time of liquidation, plus an insurance liquidation fee defined with `insuranceLiquidationPenaltyRate`
+    /// @dev Emits a {Repurchased} event
+    /// @param _nftIndex The NFT to repurchase
+    function repurchase(uint256 _nftIndex) external nonReentrant {
+        _repurchase(_nftIndex);
+    }
+
+    /// @notice Allows the liquidator who liquidated the insured position with NFT at index `_nftIndex` to claim the position's collateral
+    /// after the time period defined with `insuranceRepurchaseTimeLimit` has expired and the position owner has not repurchased the collateral.
+    /// @dev Emits an {InsuranceExpired} event
+    /// @param _nftIndex The NFT to claim
+    /// @param _recipient The address to send the NFT to
+    function claimExpiredInsuranceNFT(uint256 _nftIndex, address _recipient)
         external
-        onlyRole(DAO_ROLE)
+        nonReentrant
     {
-        _validateRate(_creditLimitRate);
-        require(
-            _greaterThan(settings.liquidationLimitRate, _creditLimitRate),
-            "invalid_credit_limit"
-        );
-        require(
-            _greaterThan(settings.cigStakedCreditLimitRate, _creditLimitRate),
-            "invalid_credit_limit"
-        );
-
-        settings.creditLimitRate = _creditLimitRate;
+        _claimExpiredInsuranceNFT(_nftIndex, _recipient);
     }
 
-    /// @notice Allows the DAO to change the minimum debt to collateral rate for a position to be market as liquidatable
-    /// @param _liquidationLimitRate The new rate
-    function setLiquidationLimitRate(Rate calldata _liquidationLimitRate)
+    /// @notice Allows the DAO to collect interest and fees before they are repaid
+    function collect() external nonReentrant onlyRole(DAO_ROLE) {
+        accrue();
+        stablecoin.mint(msg.sender, totalFeeCollected);
+        totalFeeCollected = 0;
+    }
+
+    /// @notice Allows the setter contract to change fields in the `VaultSettings` struct.
+    /// @dev Validation and single field setting is handled by an external contract with the
+    /// `SETTER_ROLE`. This was done to reduce the contract's size.
+    function setSettings(VaultSettings calldata _settings)
         external
-        onlyRole(DAO_ROLE)
+        onlyRole(SETTER_ROLE)
     {
-        _validateRate(_liquidationLimitRate);
-        require(
-            _greaterThan(_liquidationLimitRate, settings.creditLimitRate),
-            "invalid_liquidation_limit"
-        );
-        require(
-            _greaterThan(
-                settings.cigStakedLiquidationLimitRate,
-                _liquidationLimitRate
-            ),
-            "invalid_liquidation_limit"
-        );
-
-        settings.liquidationLimitRate = _liquidationLimitRate;
-    }
-
-    /// @notice Allows the DAO to change the minimum debt to collateral rate for a position staking a cig to be market as liquidatable
-    /// @param _cigLiquidationLimitRate The new rate
-    function setStakedCigLiquidationLimitRate(
-        Rate calldata _cigLiquidationLimitRate
-    ) external onlyRole(DAO_ROLE) {
-        _validateRate(_cigLiquidationLimitRate);
-        require(
-            _greaterThan(
-                _cigLiquidationLimitRate,
-                settings.cigStakedCreditLimitRate
-            ),
-            "invalid_cig_liquidation_limit"
-        );
-        require(
-            _greaterThan(
-                _cigLiquidationLimitRate,
-                settings.liquidationLimitRate
-            ),
-            "invalid_cig_liquidation_limit"
-        );
-
-        settings.cigStakedLiquidationLimitRate = _cigLiquidationLimitRate;
-    }
-
-    /// @notice Allows the DAO to change the max debt to collateral rate for a position staking a cig
-    /// @param _cigCreditLimitRate The new rate
-    function setStakedCigCreditLimitRate(Rate calldata _cigCreditLimitRate)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        _validateRate(_cigCreditLimitRate);
-        require(
-            _greaterThan(
-                settings.cigStakedLiquidationLimitRate,
-                _cigCreditLimitRate
-            ),
-            "invalid_cig_credit_limit"
-        );
-        require(
-            _greaterThan(_cigCreditLimitRate, settings.creditLimitRate),
-            "invalid_cig_credit_limit"
-        );
-
-        settings.cigStakedCreditLimitRate = _cigCreditLimitRate;
-    }
-    
-    /// @notice Allows the DAO to set the JPEG oracle
-    /// @param _aggregator new oracle address
-    function setJPEGAggregator(IAggregatorV3Interface _aggregator) external onlyRole(DAO_ROLE) {
-        require(address(_aggregator) != address(0), "invalid_address");
-        require(address(jpegAggregator) == address(0), "already_set");
-
-        jpegAggregator = _aggregator;
-    }
-
-    /// @notice Allows the DAO to change fallback oracle
-    /// @param _fallback new fallback address
-    function setFallbackOracle(IAggregatorV3Interface _fallback)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        require(address(_fallback) != address(0), "invalid_address");
-
-        fallbackOracle = _fallback;
+        settings = _settings;
     }
 
     /// @notice Allows the DAO to toggle the fallback oracle
@@ -373,36 +585,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         onlyRole(DAO_ROLE)
     {
-        require(address(fallbackOracle) != address(0), "fallback_not_set");
+        require(address(fallbackOracle) != address(0));
         useFallbackOracle = _useFallback;
-    }
-
-    /// @notice Allows the DAO to set jpeg locker
-    /// @param _jpegLocker The jpeg locker address
-    function setJPEGLocker(IJPEGLock _jpegLocker) external onlyRole(DAO_ROLE) {
-        require(address(_jpegLocker) != address(0), "invalid_address");
-        jpegLocker = _jpegLocker;
-    }
-
-    /// @notice Allows the DAO to change the amount of time JPEG tokens need to be locked to change the value of an NFT
-    /// @param _newLockTime The amount new lock time amount
-    function setJPEGLockTime(uint256 _newLockTime) external onlyRole(DAO_ROLE) {
-        require(address(jpegLocker) != address(0), "no_jpeg_locker");
-        jpegLocker.setLockTime(_newLockTime);
-    }
-
-    /// @notice Allows the DAO to change the amount of time insurance remains valid after liquidation
-    /// @param _newLimit New time limit 
-    function setInsuranceRepurchaseTimeLimit(uint256 _newLimit) external onlyRole(DAO_ROLE) {
-        require(_newLimit != 0, "invalid_limit");
-        settings.insuranceRepurchaseTimeLimit = _newLimit;
     }
 
     /// @notice Allows the DAO to bypass the floor oracle and override the NFT floor value
     /// @param _newFloor The new floor
     function overrideFloor(uint256 _newFloor) external onlyRole(DAO_ROLE) {
-        require(_newFloor != 0, "invalid_floor");
-        nftTypeValueETH[bytes32(0)] = _newFloor;
+        if (_newFloor == 0) revert InvalidAmount(_newFloor);
+        overriddenFloorValueETH = _newFloor;
         daoFloorOverride = true;
 
         emit DaoFloorChanged(_newFloor);
@@ -413,218 +604,361 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         daoFloorOverride = false;
     }
 
-    /// @notice Allows the DAO to change the static borrow fee
-    /// @param _organizationFeeRate The new fee rate
-    function setOrganizationFeeRate(Rate calldata _organizationFeeRate)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        _validateRate(_organizationFeeRate);
-        settings.organizationFeeRate = _organizationFeeRate;
-    }
-
-    /// @notice Allows the DAO to change the cost of insurance
-    /// @param _insurancePurchaseRate The new insurance fee rate
-    function setInsurancePurchaseRate(Rate calldata _insurancePurchaseRate)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        _validateRate(_insurancePurchaseRate);
-        settings.insurancePurchaseRate = _insurancePurchaseRate;
-    }
-
-    /// @notice Allows the DAO to change the repurchase penalty rate in case of liquidation of an insured NFT
-    /// @param _insuranceLiquidationPenaltyRate The new rate
-    function setInsuranceLiquidationPenaltyRate(
-        Rate calldata _insuranceLiquidationPenaltyRate
-    ) external onlyRole(DAO_ROLE) {
-        _validateRate(_insuranceLiquidationPenaltyRate);
-        settings
-            .insuranceLiquidationPenaltyRate = _insuranceLiquidationPenaltyRate;
-    }
-
     /// @notice Allows the DAO to add an NFT to a specific price category
-    /// @param _nftIndex The index to add to the category
+    /// @param _nftIndexes The indexes to add to the category
     /// @param _type The category hash
-    function setNFTType(uint256 _nftIndex, bytes32 _type)
-        external
-        validNFTIndex(_nftIndex)
-        onlyRole(DAO_ROLE)
-    {
-        require(
-            _type == bytes32(0) || nftTypeValueETH[_type] != 0,
-            "invalid_nftType"
-        );
-        nftTypes[_nftIndex] = _type;
-    }
-
-    /// @notice Allows the DAO to change the value of an NFT category
-    /// @param _type The category hash
-    /// @param _amountETH The new value, in ETH
-    function setNFTTypeValueETH(bytes32 _type, uint256 _amountETH)
+    function setNFTType(uint256[] calldata _nftIndexes, bytes32 _type)
         external
         onlyRole(DAO_ROLE)
     {
-        nftTypeValueETH[_type] = _amountETH;
-    }
+        if (_type != bytes32(0) && nftTypeValueMultiplier[_type].numerator == 0)
+            revert InvalidNFTType(_type);
 
-    /// @notice Allows the DAO to set the value in ETH of the NFT at index `_nftIndex`.
-    /// A JPEG deposit by a user is required afterwards. See {finalizePendingNFTValueETH} for more details
-    /// @param _nftIndex The index of the NFT to change the value of
-    /// @param _amountETH The new desired ETH value
-    function setPendingNFTValueETH(uint256 _nftIndex, uint256 _amountETH)
-        external
-        validNFTIndex(_nftIndex)
-        onlyRole(DAO_ROLE)
-    {
-        require(address(jpegLocker) != address(0), "no_jpeg_locker");
-        
-        pendingNFTValueETH[_nftIndex] = _amountETH;
-    }
-
-    /// @notice Allows a user to lock up JPEG to make the change in value of an NFT effective.
-    /// Can only be called after {setPendingNFTValueETH}, which requires a governance vote.
-    /// @dev The amount of JPEG that needs to be locked is calculated by applying `valueIncreaseLockRate`
-    /// to the new credit limit of the NFT
-    /// @param _nftIndex The index of the NFT
-    function finalizePendingNFTValueETH(uint256 _nftIndex)
-        external
-        validNFTIndex(_nftIndex)
-    {
-        require(address(jpegLocker) != address(0), "no_jpeg_locker");
-
-        uint256 pendingValue = pendingNFTValueETH[_nftIndex];
-        require(pendingValue != 0, "no_pending_value");
-        uint256 toLockJpeg = (((pendingValue *
-            1 ether *
-            settings.creditLimitRate.numerator) /
-            settings.creditLimitRate.denominator) *
-            settings.valueIncreaseLockRate.numerator) /
-            settings.valueIncreaseLockRate.denominator /
-            _jpegPriceETH();
-
-        //lock JPEG using JPEGLock
-        jpegLocker.lockFor(msg.sender, _nftIndex, toLockJpeg);
-
-        nftTypes[_nftIndex] = CUSTOM_NFT_HASH;
-        nftValueETH[_nftIndex] = pendingValue;
-        //clear pending value
-        pendingNFTValueETH[_nftIndex] = 0;
-    }
-
-    /// @dev Checks if `r1` is greater than `r2`.
-    function _greaterThan(Rate memory _r1, Rate memory _r2)
-        internal
-        pure
-        returns (bool)
-    {
-        return
-            _r1.numerator * _r2.denominator > _r2.numerator * _r1.denominator;
-    }
-
-    /// @dev Validates a rate. The denominator must be greater than zero and greater than or equal to the numerator.
-    /// @param rate The rate to validate
-    function _validateRate(Rate calldata rate) internal pure {
-        require(
-            rate.denominator != 0 && rate.denominator >= rate.numerator,
-            "invalid_rate"
-        );
-    }
-
-    /// @dev Returns the value in ETH of the NFT at index `_nftIndex`
-    /// @param _nftIndex The NFT to return the value of
-    /// @return The value of the NFT, 18 decimals
-    function _getNFTValueETH(uint256 _nftIndex)
-        internal
-        view
-        returns (uint256)
-    {
-        bytes32 nftType = nftTypes[_nftIndex];
-
-        if (nftType == bytes32(0) && !daoFloorOverride) {
-            return
-                _normalizeAggregatorAnswer(
-                    useFallbackOracle ? fallbackOracle : floorOracle
-                );
-        } else if (nftType == CUSTOM_NFT_HASH) return nftValueETH[_nftIndex];
-
-        return nftTypeValueETH[nftType];
-    }
-
-    /// @dev Returns the value in USD of the NFT at index `_nftIndex`
-    /// @param _nftIndex The NFT to return the value of
-    /// @return The value of the NFT in USD, 18 decimals
-    function _getNFTValueUSD(uint256 _nftIndex)
-        internal
-        view
-        returns (uint256)
-    {
-        uint256 nft_value = _getNFTValueETH(_nftIndex);
-        return (nft_value * _ethPriceUSD()) / 1 ether;
-    }
-
-    /// @dev Returns the current ETH price in USD
-    /// @return The current ETH price, 18 decimals
-    function _ethPriceUSD() internal view returns (uint256) {
-        return _normalizeAggregatorAnswer(ethAggregator);
-    }
-
-    /// @dev Returns the current JPEG price in ETH
-    /// @return The current JPEG price, 18 decimals
-    function _jpegPriceETH() internal view returns (uint256) {
-        IAggregatorV3Interface aggregator = jpegAggregator;
-
-        require(address(aggregator) != address(0), "jpeg_oracle_not_set");
-        return _normalizeAggregatorAnswer(aggregator);
-    }
-
-    /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
-    /// @param aggregator The aggregator to fetch the answer from
-    /// @return The latest aggregator answer, normalized
-    function _normalizeAggregatorAnswer(IAggregatorV3Interface aggregator)
-        internal
-        view
-        returns (uint256)
-    {
-        (, int256 answer, , uint256 timestamp, ) = aggregator.latestRoundData();
-
-        require(answer > 0, "invalid_oracle_answer");
-        require(timestamp != 0, "round_incomplete");
-
-        uint8 decimals = aggregator.decimals();
-
-        unchecked {
-            //converts the answer to have 18 decimals
-            return
-                decimals > 18
-                    ? uint256(answer) / 10**(decimals - 18)
-                    : uint256(answer) * 10**(18 - decimals);
+        for (uint256 i; i < _nftIndexes.length; ++i) {
+            nftTypes[_nftIndexes[i]] = _type;
         }
     }
 
-    struct NFTInfo {
-        uint256 index;
-        bytes32 nftType;
-        address owner;
-        uint256 nftValueETH;
-        uint256 nftValueUSD;
+    /// @notice Allows the DAO to change the multiplier of an NFT category
+    /// @param _type The category hash
+    /// @param _multiplier The new multiplier
+    function setNFTTypeMultiplier(bytes32 _type, Rate calldata _multiplier)
+        external
+        onlyRole(DAO_ROLE)
+    {
+        if (_type == bytes32(0)) revert InvalidNFTType(_type);
+        _validateRateAboveOne(_multiplier);
+        nftTypeValueMultiplier[_type] = _multiplier;
     }
 
-    /// @notice Returns data relative to the NFT at index `_nftIndex`
-    /// @param _nftIndex The NFT index
-    /// @return nftInfo The data relative to the NFT
-    function getNFTInfo(uint256 _nftIndex)
+    /// @notice Allows the DAO to set the JPEG oracle
+    /// @param _aggregator new oracle address
+    function setJPEGAggregator(IAggregatorV3Interface _aggregator)
         external
-        view
-        returns (NFTInfo memory nftInfo)
+        onlyRole(DAO_ROLE)
     {
-        nftInfo = NFTInfo(
-            _nftIndex,
-            nftTypes[_nftIndex],
-            nftContract.ownerOf(_nftIndex),
-            _getNFTValueETH(_nftIndex),
-            _getNFTValueUSD(_nftIndex)
+        if (address(_aggregator) == address(0)) revert ZeroAddress();
+
+        jpegAggregator = _aggregator;
+    }
+
+    /// @notice Allows the DAO to change fallback oracle
+    /// @param _fallback new fallback address
+    function setFallbackOracle(IAggregatorV3Interface _fallback)
+        external
+        onlyRole(DAO_ROLE)
+    {
+        if (address(_fallback) == address(0)) revert ZeroAddress();
+
+        fallbackOracle = _fallback;
+    }
+
+    /// @dev See {applyTraitBoost}
+    function _applyTraitBoost(uint256 _nftIndex, uint256 _unlockAt)
+        internal
+        validNFTIndex(_nftIndex)
+    {
+        bytes32 nftType = nftTypes[_nftIndex];
+        if (nftType == bytes32(0)) revert InvalidNFTType(nftType);
+
+        JPEGLock storage jpegLock = lockPositions[_nftIndex];
+        if (block.timestamp >= _unlockAt || jpegLock.unlockAt >= _unlockAt)
+            revert InvalidUnlockTime(_unlockAt);
+
+        Rate memory multiplier = nftTypeValueMultiplier[nftType];
+
+        uint256 jpegToLock = (getFloorETH() *
+            1 ether *
+            multiplier.numerator *
+            settings.creditLimitRate.numerator *
+            settings.valueIncreaseLockRate.numerator) /
+            multiplier.denominator /
+            settings.creditLimitRate.denominator /
+            settings.valueIncreaseLockRate.denominator /
+            _jpegPriceETH();
+
+        uint256 previousLockValue = jpegLock.lockedValue;
+        address previousOwner = jpegLock.owner;
+
+        jpegLock.lockedValue = jpegToLock;
+        jpegLock.unlockAt = _unlockAt;
+        jpegLock.owner = msg.sender;
+
+        if (previousOwner == msg.sender) {
+            if (jpegToLock > previousLockValue)
+                jpeg.safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    jpegToLock - previousLockValue
+                );
+            else if (previousLockValue > jpegToLock)
+                jpeg.safeTransfer(msg.sender, previousLockValue - jpegToLock);
+        } else {
+            if (previousLockValue > 0)
+                jpeg.safeTransfer(previousOwner, previousLockValue);
+            jpeg.safeTransferFrom(msg.sender, address(this), jpegToLock);
+        }
+
+        emit JPEGLocked(msg.sender, _nftIndex, jpegToLock, _unlockAt);
+    }
+
+    /// @dev See {unlockJPEG}
+    function _unlockJPEG(uint256 _nftIndex) internal validNFTIndex(_nftIndex) {
+        JPEGLock memory jpegLock = lockPositions[_nftIndex];
+        if (jpegLock.owner != msg.sender) revert Unauthorized();
+
+        if (block.timestamp < jpegLock.unlockAt) revert Unauthorized();
+
+        delete lockPositions[_nftIndex];
+
+        jpeg.safeTransfer(msg.sender, jpegLock.lockedValue);
+
+        emit JPEGUnlocked(msg.sender, _nftIndex, jpegLock.lockedValue);
+    }
+
+    /// @dev Opens a position
+    /// Emits a {PositionOpened} event
+    /// @param _owner The owner of the position to open
+    /// @param _nftIndex The NFT used as collateral for the position
+    function _openPosition(address _owner, uint256 _nftIndex) internal {
+        positionOwner[_nftIndex] = _owner;
+        positionIndexes.add(_nftIndex);
+
+        nftContract.transferFrom(_owner, address(this), _nftIndex);
+
+        emit PositionOpened(_owner, _nftIndex);
+    }
+
+    /// @dev See {borrow}
+    function _borrow(
+        uint256 _nftIndex,
+        uint256 _amount,
+        bool _useInsurance
+    ) internal validNFTIndex(_nftIndex) {
+        address owner = positionOwner[_nftIndex];
+        if (owner != msg.sender && owner != address(0)) revert Unauthorized();
+
+        if (_amount == 0) revert InvalidAmount(_amount);
+
+        if (totalDebtAmount + _amount > settings.borrowAmountCap)
+            revert DebtCapReached();
+
+        Position storage position = positions[_nftIndex];
+        if (position.liquidatedAt != 0) revert PositionLiquidated(_nftIndex);
+
+        BorrowType borrowType = position.borrowType;
+        BorrowType targetBorrowType = _useInsurance
+            ? BorrowType.USE_INSURANCE
+            : BorrowType.NON_INSURANCE;
+
+        if (borrowType == BorrowType.NOT_CONFIRMED)
+            position.borrowType = targetBorrowType;
+        else if (borrowType != targetBorrowType) revert InvalidInsuranceMode();
+
+        uint256 creditLimit = _getCreditLimit(msg.sender, _nftIndex);
+        uint256 debtAmount = _getDebtAmount(_nftIndex);
+        if (debtAmount + _amount > creditLimit) revert InvalidAmount(_amount);
+
+        //calculate the borrow fee
+        uint256 organizationFee = (_amount *
+            settings.organizationFeeRate.numerator) /
+            settings.organizationFeeRate.denominator;
+
+        uint256 feeAmount = organizationFee;
+        //if the position is insured, calculate the insurance fee
+        if (targetBorrowType == BorrowType.USE_INSURANCE) {
+            feeAmount +=
+                (_amount * settings.insurancePurchaseRate.numerator) /
+                settings.insurancePurchaseRate.denominator;
+        }
+        totalFeeCollected += feeAmount;
+
+        uint256 debtPortion = totalDebtPortion;
+        // update debt portion
+        if (debtPortion == 0) {
+            totalDebtPortion = _amount;
+            position.debtPortion = _amount;
+        } else {
+            uint256 plusPortion = (debtPortion * _amount) / totalDebtAmount;
+            totalDebtPortion = debtPortion + plusPortion;
+            position.debtPortion += plusPortion;
+        }
+        position.debtPrincipal += _amount;
+        totalDebtAmount += _amount;
+
+        if (positionOwner[_nftIndex] == address(0)) {
+            _openPosition(msg.sender, _nftIndex);
+        }
+
+        //subtract the fee from the amount borrowed
+        stablecoin.mint(msg.sender, _amount - feeAmount);
+
+        emit Borrowed(msg.sender, _nftIndex, _amount);
+    }
+
+    /// @dev See {repay}
+    function _repay(uint256 _nftIndex, uint256 _amount)
+        internal
+        validNFTIndex(_nftIndex)
+    {
+        if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
+
+        if (_amount == 0) revert InvalidAmount(_amount);
+
+        Position storage position = positions[_nftIndex];
+        if (position.liquidatedAt > 0) revert PositionLiquidated(_nftIndex);
+
+        uint256 debtAmount = _getDebtAmount(_nftIndex);
+        if (debtAmount == 0) revert NoDebt();
+
+        uint256 debtPrincipal = position.debtPrincipal;
+        uint256 debtInterest = debtAmount - debtPrincipal;
+
+        _amount = _amount > debtAmount ? debtAmount : _amount;
+
+        // burn all payment, the interest is sent to the DAO using the {collect} function
+        stablecoin.burnFrom(msg.sender, _amount);
+
+        uint256 paidPrincipal;
+
+        unchecked {
+            paidPrincipal = _amount > debtInterest ? _amount - debtInterest : 0;
+        }
+
+        uint256 totalPortion = totalDebtPortion;
+        uint256 totalDebt = totalDebtAmount;
+        uint256 minusPortion = paidPrincipal == debtPrincipal
+            ? position.debtPortion
+            : (totalPortion * _amount) / totalDebt;
+
+        totalDebtPortion = totalPortion - minusPortion;
+        position.debtPortion -= minusPortion;
+        position.debtPrincipal -= paidPrincipal;
+        totalDebtAmount = totalDebt - _amount;
+
+        emit Repaid(msg.sender, _nftIndex, _amount);
+    }
+
+    /// @dev See {closePosition}
+    function _closePosition(uint256 _nftIndex)
+        internal
+        validNFTIndex(_nftIndex)
+    {
+        if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
+        if (positions[_nftIndex].liquidatedAt > 0)
+            revert PositionLiquidated(_nftIndex);
+        uint256 debt = _getDebtAmount(_nftIndex);
+        if (debt > 0) revert NonZeroDebt(debt);
+
+        positionOwner[_nftIndex] = address(0);
+        delete positions[_nftIndex];
+        positionIndexes.remove(_nftIndex);
+
+        // transfer nft back to owner if nft was deposited
+        if (nftContract.ownerOf(_nftIndex) == address(this)) {
+            nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
+        }
+
+        emit PositionClosed(msg.sender, _nftIndex);
+    }
+
+    /// @dev See {liquidate}
+    function _liquidate(uint256 _nftIndex, address _recipient)
+        internal
+        onlyRole(LIQUIDATOR_ROLE)
+        validNFTIndex(_nftIndex)
+    {
+        address posOwner = positionOwner[_nftIndex];
+        if (posOwner == address(0)) revert InvalidPosition(_nftIndex);
+
+        Position storage position = positions[_nftIndex];
+        if (position.liquidatedAt > 0) revert PositionLiquidated(_nftIndex);
+
+        uint256 debtAmount = _getDebtAmount(_nftIndex);
+        if (debtAmount < _getLiquidationLimit(posOwner, _nftIndex))
+            revert InvalidPosition(_nftIndex);
+
+        // burn all payment
+        stablecoin.burnFrom(msg.sender, debtAmount);
+
+        // update debt portion
+        totalDebtPortion -= position.debtPortion;
+        totalDebtAmount -= debtAmount;
+        position.debtPortion = 0;
+
+        bool insured = position.borrowType == BorrowType.USE_INSURANCE;
+        if (insured) {
+            position.debtAmountForRepurchase = debtAmount;
+            position.liquidatedAt = block.timestamp;
+            position.liquidator = msg.sender;
+        } else {
+            // transfer nft to liquidator
+            positionOwner[_nftIndex] = address(0);
+            delete positions[_nftIndex];
+            positionIndexes.remove(_nftIndex);
+            nftContract.transferFrom(address(this), _recipient, _nftIndex);
+        }
+
+        emit Liquidated(msg.sender, posOwner, _nftIndex, insured);
+    }
+
+    /// @dev See {repurchase}
+    function _repurchase(uint256 _nftIndex) internal validNFTIndex(_nftIndex) {
+        Position memory position = positions[_nftIndex];
+        if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
+        if (position.liquidatedAt == 0) revert InvalidPosition(_nftIndex);
+        if (position.borrowType != BorrowType.USE_INSURANCE)
+            revert InvalidPosition(_nftIndex);
+        if (
+            block.timestamp >=
+            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit
+        ) revert PositionInsuranceExpired(_nftIndex);
+
+        uint256 debtAmount = position.debtAmountForRepurchase;
+        uint256 penalty = (debtAmount *
+            settings.insuranceLiquidationPenaltyRate.numerator) /
+            settings.insuranceLiquidationPenaltyRate.denominator;
+
+        // transfer nft to user
+        positionOwner[_nftIndex] = address(0);
+        delete positions[_nftIndex];
+        positionIndexes.remove(_nftIndex);
+
+        // transfer payment to liquidator
+        stablecoin.safeTransferFrom(
+            msg.sender,
+            position.liquidator,
+            debtAmount + penalty
         );
+
+        nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
+
+        emit Repurchased(msg.sender, _nftIndex);
+    }
+
+    /// @dev See {claimExpiredInsuranceNFT}
+    function _claimExpiredInsuranceNFT(uint256 _nftIndex, address _recipient)
+        internal
+        validNFTIndex(_nftIndex)
+    {
+        if (_recipient == address(0)) revert ZeroAddress();
+        Position memory position = positions[_nftIndex];
+        address owner = positionOwner[_nftIndex];
+        if (owner == address(0)) revert InvalidPosition(_nftIndex);
+        if (position.liquidatedAt == 0) revert InvalidPosition(_nftIndex);
+        if (
+            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit >
+            block.timestamp
+        ) revert PositionInsuranceNotExpired(_nftIndex);
+        if (position.liquidator != msg.sender) revert Unauthorized();
+
+        positionOwner[_nftIndex] = address(0);
+        delete positions[_nftIndex];
+        positionIndexes.remove(_nftIndex);
+
+        nftContract.transferFrom(address(this), _recipient, _nftIndex);
+
+        emit InsuranceExpired(owner, _nftIndex);
     }
 
     /// @dev Returns the credit limit of an NFT
@@ -635,7 +969,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        uint256 value = _getNFTValueUSD(_nftIndex);
+        uint256 value = getNFTValueUSD(_nftIndex);
         if (cigStaking.isUserStaking(user)) {
             return
                 (value * settings.cigStakedCreditLimitRate.numerator) /
@@ -654,7 +988,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        uint256 value = _getNFTValueUSD(_nftIndex);
+        uint256 value = getNFTValueUSD(_nftIndex);
         if (cigStaking.isUserStaking(user)) {
             return
                 (value * settings.cigStakedLiquidationLimitRate.numerator) /
@@ -697,19 +1031,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return totalPortion == 0 ? 0 : (total * userPortion) / totalPortion;
     }
 
-    /// @dev Opens a position
-    /// Emits a {PositionOpened} event
-    /// @param _owner The owner of the position to open
-    /// @param _nftIndex The NFT used as collateral for the position
-    function _openPosition(address _owner, uint256 _nftIndex) internal {
-        positionOwner[_nftIndex] = _owner;
-        positionIndexes.add(_nftIndex);
-
-        nftContract.transferFrom(_owner, address(this), _nftIndex);
-
-        emit PositionOpened(_owner, _nftIndex);
-    }
-
     /// @dev Calculates the additional global interest since last time the contract's state was updated by calling {accrue}
     /// @return The additional interest value
     function _calculateAdditionalInterest() internal view returns (uint256) {
@@ -731,375 +1052,64 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             365 days;
     }
 
-    /// @notice Returns the number of open positions
-    /// @return The number of open positions
-    function totalPositions() external view returns (uint256) {
-        return positionIndexes.length();
+    /// @dev Returns the current ETH price in USD
+    /// @return The current ETH price, 18 decimals
+    function _ethPriceUSD() internal view returns (uint256) {
+        return _normalizeAggregatorAnswer(ethAggregator);
     }
 
-    /// @notice Returns all open position NFT indexes
-    /// @return The open position NFT indexes
-    function openPositionsIndexes() external view returns (uint256[] memory) {
-        return positionIndexes.values();
+    /// @dev Returns the current JPEG price in ETH
+    /// @return The current JPEG price, 18 decimals
+    function _jpegPriceETH() internal view returns (uint256) {
+        IAggregatorV3Interface aggregator = jpegAggregator;
+        if (address(aggregator) == address(0)) revert NoOracleSet();
+        return _normalizeAggregatorAnswer(aggregator);
     }
 
-    struct PositionPreview {
-        address owner;
-        uint256 nftIndex;
-        bytes32 nftType;
-        uint256 nftValueUSD;
-        VaultSettings vaultSettings;
-        uint256 creditLimit;
-        uint256 debtPrincipal;
-        uint256 debtInterest;
-        uint256 liquidatedAt;
-        BorrowType borrowType;
-        bool liquidatable;
-        address liquidator;
-    }
-
-    /// @notice Returns data relative to a postition, existing or not
-    /// @param _nftIndex The index of the NFT used as collateral for the position
-    /// @return preview See assignment below
-    function showPosition(uint256 _nftIndex)
-        external
+    /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
+    /// @param aggregator The aggregator to fetch the answer from
+    /// @return The latest aggregator answer, normalized
+    function _normalizeAggregatorAnswer(IAggregatorV3Interface aggregator)
+        internal
         view
-        validNFTIndex(_nftIndex)
-        returns (PositionPreview memory preview)
+        returns (uint256)
     {
-        address posOwner = positionOwner[_nftIndex];
+        (, int256 answer, , uint256 timestamp, ) = aggregator.latestRoundData();
 
-        Position storage position = positions[_nftIndex];
-        uint256 debtPrincipal = position.debtPrincipal;
-        uint256 liquidatedAt = position.liquidatedAt;
-        uint256 debtAmount = liquidatedAt != 0
-            ? position.debtAmountForRepurchase //calculate updated debt
-            : _calculateDebt(
-                totalDebtAmount + _calculateAdditionalInterest(),
-                position.debtPortion,
-                totalDebtPortion
-            );
+        if (answer == 0 || timestamp == 0) revert InvalidOracleResults();
 
-        //_calculateDebt is prone to rounding errors that may cause
-        //the calculated debt amount to be 1 or 2 units less than
-        //the debt principal if no time has elapsed in between the first borrow
-        //and the _calculateDebt call.
-        if (debtPrincipal > debtAmount) debtAmount = debtPrincipal;
+        uint8 decimals = aggregator.decimals();
 
         unchecked {
-            preview = PositionPreview({
-                owner: posOwner, //the owner of the position, `address(0)` if the position doesn't exists
-                nftIndex: _nftIndex, //the NFT used as collateral for the position
-                nftType: nftTypes[_nftIndex], //the type of the NFT
-                nftValueUSD: _getNFTValueUSD(_nftIndex), //the value in USD of the NFT
-                vaultSettings: settings, //the current vault's settings
-                creditLimit: _getCreditLimit(posOwner, _nftIndex), //the NFT's credit limit
-                debtPrincipal: debtPrincipal, //the debt principal for the position, `0` if the position doesn't exists
-                debtInterest: debtAmount - debtPrincipal, //the interest of the position
-                borrowType: position.borrowType, //the insurance type of the position, `NOT_CONFIRMED` if it doesn't exist
-                liquidatable: liquidatedAt == 0 &&
-                    debtAmount >= _getLiquidationLimit(posOwner, _nftIndex), //if the position can be liquidated
-                liquidatedAt: liquidatedAt, //if the position has been liquidated and it had insurance, the timestamp at which the liquidation happened
-                liquidator: position.liquidator //if the position has been liquidated and it had insurance, the address of the liquidator
-            });
+            //converts the answer to have 18 decimals
+            return
+                decimals > 18
+                    ? uint256(answer) / 10**(decimals - 18)
+                    : uint256(answer) * 10**(18 - decimals);
         }
     }
 
-    /// @notice Allows users to open positions and borrow using an NFT
-    /// @dev emits a {Borrowed} event
-    /// @param _nftIndex The index of the NFT to be used as collateral
-    /// @param _amount The amount of PUSD to be borrowed. Note that the user will receive less than the amount requested,
-    /// the borrow fee and insurance automatically get removed from the amount borrowed
-    /// @param _useInsurance Whereter to open an insured position. In case the position has already been opened previously,
-    /// this parameter needs to match the previous insurance mode. To change insurance mode, a user needs to close and reopen the position
-    function borrow(
-        uint256 _nftIndex,
-        uint256 _amount,
-        bool _useInsurance
-    ) external validNFTIndex(_nftIndex) nonReentrant {
-        accrue();
-
-        require(
-            msg.sender == positionOwner[_nftIndex] ||
-                address(0) == positionOwner[_nftIndex],
-            "unauthorized"
-        );
-        require(_amount != 0, "invalid_amount");
-        require(
-            totalDebtAmount + _amount <= settings.borrowAmountCap,
-            "debt_cap"
-        );
-
-        Position storage position = positions[_nftIndex];
-        require(position.liquidatedAt == 0, "liquidated");
-        require(
-            position.borrowType == BorrowType.NOT_CONFIRMED ||
-                (position.borrowType == BorrowType.USE_INSURANCE &&
-                    _useInsurance) ||
-                (position.borrowType == BorrowType.NON_INSURANCE &&
-                    !_useInsurance),
-            "invalid_insurance_mode"
-        );
-
-        uint256 creditLimit = _getCreditLimit(msg.sender, _nftIndex);
-        uint256 debtAmount = _getDebtAmount(_nftIndex);
-        require(debtAmount + _amount <= creditLimit, "insufficient_credit");
-
-        //calculate the borrow fee
-        uint256 organizationFee = (_amount *
-            settings.organizationFeeRate.numerator) /
-            settings.organizationFeeRate.denominator;
-
-        uint256 feeAmount = organizationFee;
-        //if the position is insured, calculate the insurance fee
-        if (position.borrowType == BorrowType.USE_INSURANCE || _useInsurance) {
-            feeAmount +=
-                (_amount * settings.insurancePurchaseRate.numerator) /
-                settings.insurancePurchaseRate.denominator;
-        }
-        totalFeeCollected += feeAmount;
-
-        if (position.borrowType == BorrowType.NOT_CONFIRMED) {
-            position.borrowType = _useInsurance
-                ? BorrowType.USE_INSURANCE
-                : BorrowType.NON_INSURANCE;
-        }
-
-        uint256 debtPortion = totalDebtPortion;
-        // update debt portion
-        if (debtPortion == 0) {
-            totalDebtPortion = _amount;
-            position.debtPortion = _amount;
-        } else {
-            uint256 plusPortion = (debtPortion * _amount) / totalDebtAmount;
-            totalDebtPortion = debtPortion + plusPortion;
-            position.debtPortion += plusPortion;
-        }
-        position.debtPrincipal += _amount;
-        totalDebtAmount += _amount;
-
-        if (positionOwner[_nftIndex] == address(0)) {
-            _openPosition(msg.sender, _nftIndex);
-        }
-
-        //subtract the fee from the amount borrowed
-        stablecoin.mint(msg.sender, _amount - feeAmount);
-
-        emit Borrowed(msg.sender, _nftIndex, _amount);
-    }
-
-    /// @notice Allows users to repay a portion/all of their debt. Note that since interest increases every second,
-    /// a user wanting to repay all of their debt should repay for an amount greater than their current debt to account for the
-    /// additional interest while the repay transaction is pending, the contract will only take what's necessary to repay all the debt
-    /// @dev Emits a {Repaid} event
-    /// @param _nftIndex The NFT used as collateral for the position
-    /// @param _amount The amount of debt to repay. If greater than the position's outstanding debt, only the amount necessary to repay all the debt will be taken
-    function repay(uint256 _nftIndex, uint256 _amount)
-        external
-        validNFTIndex(_nftIndex)
-        nonReentrant
+    /// @dev Checks if `r1` is greater than `r2`.
+    function _greaterThan(Rate memory _r1, Rate memory _r2)
+        internal
+        pure
+        returns (bool)
     {
-        accrue();
-
-        require(msg.sender == positionOwner[_nftIndex], "unauthorized");
-        require(_amount != 0, "invalid_amount");
-
-        Position storage position = positions[_nftIndex];
-        require(position.liquidatedAt == 0, "liquidated");
-
-        uint256 debtAmount = _getDebtAmount(_nftIndex);
-        require(debtAmount != 0, "position_not_borrowed");
-
-        uint256 debtPrincipal = position.debtPrincipal;
-        uint256 debtInterest = debtAmount - debtPrincipal;
-
-        _amount = _amount > debtAmount ? debtAmount : _amount;
-
-        // burn all payment, the interest is sent to the DAO using the {collect} function
-        stablecoin.burnFrom(msg.sender, _amount);
-
-        uint256 paidPrincipal;
-
-        unchecked {
-            paidPrincipal = _amount > debtInterest ? _amount - debtInterest : 0;
-        }
-
-        uint256 totalPortion = totalDebtPortion;
-        uint256 totalDebt = totalDebtAmount;
-        uint256 minusPortion = paidPrincipal == debtPrincipal
-            ? position.debtPortion
-            : (totalPortion * _amount) / totalDebt;
-
-        totalDebtPortion = totalPortion - minusPortion;
-        position.debtPortion -= minusPortion;
-        position.debtPrincipal -= paidPrincipal;
-        totalDebtAmount = totalDebt - _amount;
-
-        emit Repaid(msg.sender, _nftIndex, _amount);
+        return
+            _r1.numerator * _r2.denominator > _r2.numerator * _r1.denominator;
     }
 
-    /// @notice Allows a user to close a position and get their collateral back, if the position's outstanding debt is 0
-    /// @dev Emits a {PositionClosed} event
-    /// @param _nftIndex The index of the NFT used as collateral
-    function closePosition(uint256 _nftIndex)
-        external
-        validNFTIndex(_nftIndex)
-        nonReentrant
-    {
-        accrue();
-
-        require(msg.sender == positionOwner[_nftIndex], "unauthorized");
-        require(positions[_nftIndex].liquidatedAt == 0, "liquidated");
-        require(_getDebtAmount(_nftIndex) == 0, "position_not_repaid");
-
-        positionOwner[_nftIndex] = address(0);
-        delete positions[_nftIndex];
-        positionIndexes.remove(_nftIndex);
-
-        // transfer nft back to owner if nft was deposited
-        if (nftContract.ownerOf(_nftIndex) == address(this)) {
-            nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
-        }
-
-        emit PositionClosed(msg.sender, _nftIndex);
+    /// @dev Validates a rate. The denominator must be greater than zero and greater than or equal to the numerator.
+    /// @param _rate The rate to validate
+    function _validateRateBelowOne(Rate memory _rate) internal pure {
+        if (_rate.denominator == 0 || _rate.denominator < _rate.numerator)
+            revert InvalidRate(_rate);
     }
 
-    /// @notice Allows members of the `LIQUIDATOR_ROLE` to liquidate a position. Positions can only be liquidated
-    /// once their debt amount exceeds the minimum liquidation debt to collateral value rate.
-    /// In order to liquidate a position, the liquidator needs to repay the user's outstanding debt.
-    /// If the position is not insured, it's closed immediately and the collateral is sent to `_recipient`.
-    /// If the position is insured, the position remains open (interest doesn't increase) and the owner of the position has a certain amount of time
-    /// (`insuranceRepurchaseTimeLimit`) to fully repay the liquidator and pay an additional liquidation fee (`insuranceLiquidationPenaltyRate`), if this
-    /// is done in time the user gets back their collateral and their position is automatically closed. If the user doesn't repurchase their collateral
-    /// before the time limit passes, the liquidator can claim the liquidated NFT and the position is closed
-    /// @dev Emits a {Liquidated} event
-    /// @param _nftIndex The NFT to liquidate
-    /// @param _recipient The address to send the NFT to
-    function liquidate(uint256 _nftIndex, address _recipient)
-        external
-        onlyRole(LIQUIDATOR_ROLE)
-        validNFTIndex(_nftIndex)
-        nonReentrant
-    {
-        accrue();
-
-        address posOwner = positionOwner[_nftIndex];
-        require(posOwner != address(0), "position_not_exist");
-
-        Position storage position = positions[_nftIndex];
-        require(position.liquidatedAt == 0, "liquidated");
-
-        uint256 debtAmount = _getDebtAmount(_nftIndex);
-        require(
-            debtAmount >= _getLiquidationLimit(posOwner, _nftIndex),
-            "position_not_liquidatable"
-        );
-
-        // burn all payment
-        stablecoin.burnFrom(msg.sender, debtAmount);
-
-        // update debt portion
-        totalDebtPortion -= position.debtPortion;
-        totalDebtAmount -= debtAmount;
-        position.debtPortion = 0;
-
-        bool insured = position.borrowType == BorrowType.USE_INSURANCE;
-        if (insured) {
-            position.debtAmountForRepurchase = debtAmount;
-            position.liquidatedAt = block.timestamp;
-            position.liquidator = msg.sender;
-        } else {
-            // transfer nft to liquidator
-            positionOwner[_nftIndex] = address(0);
-            delete positions[_nftIndex];
-            positionIndexes.remove(_nftIndex);
-            nftContract.transferFrom(address(this), _recipient, _nftIndex);
-        }
-
-        emit Liquidated(msg.sender, posOwner, _nftIndex, insured);
+    /// @dev Validates a rate. The denominator must be greater than zero and less than or equal to the numerator.
+    /// @param _rate The rate to validate
+    function _validateRateAboveOne(Rate memory _rate) internal pure {
+        if (_rate.denominator == 0 || _rate.numerator < _rate.denominator)
+            revert InvalidRate(_rate);
     }
-
-    /// @notice Allows liquidated users who purchased insurance to repurchase their collateral within the time limit
-    /// defined with the `insuranceRepurchaseTimeLimit`. The user needs to pay the liquidator the total amount of debt
-    /// the position had at the time of liquidation, plus an insurance liquidation fee defined with `insuranceLiquidationPenaltyRate`
-    /// @dev Emits a {Repurchased} event
-    /// @param _nftIndex The NFT to repurchase
-    function repurchase(uint256 _nftIndex)
-        external
-        validNFTIndex(_nftIndex)
-        nonReentrant
-    {
-        Position memory position = positions[_nftIndex];
-        require(msg.sender == positionOwner[_nftIndex], "unauthorized");
-        require(position.liquidatedAt != 0, "not_liquidated");
-        require(
-            position.borrowType == BorrowType.USE_INSURANCE,
-            "non_insurance"
-        );
-        require(
-            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit >=
-                block.timestamp,
-            "insurance_expired"
-        );
-
-        uint256 debtAmount = position.debtAmountForRepurchase;
-        uint256 penalty = (debtAmount *
-            settings.insuranceLiquidationPenaltyRate.numerator) /
-            settings.insuranceLiquidationPenaltyRate.denominator;
-
-        // transfer nft to user
-        positionOwner[_nftIndex] = address(0);
-        delete positions[_nftIndex];
-        positionIndexes.remove(_nftIndex);
-
-        // transfer payment to liquidator
-        stablecoin.safeTransferFrom(
-            msg.sender,
-            position.liquidator,
-            debtAmount + penalty
-        );
-
-        nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
-
-        emit Repurchased(msg.sender, _nftIndex);
-    }
-
-    /// @notice Allows the liquidator who liquidated the insured position with NFT at index `_nftIndex` to claim the position's collateral
-    /// after the time period defined with `insuranceRepurchaseTimeLimit` has expired and the position owner has not repurchased the collateral.
-    /// @dev Emits an {InsuranceExpired} event
-    /// @param _nftIndex The NFT to claim
-    /// @param _recipient The address to send the NFT to
-    function claimExpiredInsuranceNFT(uint256 _nftIndex, address _recipient)
-        external
-        validNFTIndex(_nftIndex)
-        nonReentrant
-    {
-        Position memory position = positions[_nftIndex];
-        address owner = positionOwner[_nftIndex];
-        require(address(0) != owner, "no_position");
-        require(position.liquidatedAt != 0, "not_liquidated");
-        require(
-            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit <
-                block.timestamp,
-            "insurance_not_expired"
-        );
-        require(position.liquidator == msg.sender, "unauthorized");
-
-        positionOwner[_nftIndex] = address(0);
-        delete positions[_nftIndex];
-        positionIndexes.remove(_nftIndex);
-
-        nftContract.transferFrom(address(this), _recipient, _nftIndex);
-
-        emit InsuranceExpired(owner, _nftIndex);
-    }
-
-    /// @notice Allows the DAO to collect interest and fees before they are repaid
-    function collect() external nonReentrant onlyRole(DAO_ROLE) {
-        accrue();
-        stablecoin.mint(msg.sender, totalFeeCollected);
-        totalFeeCollected = 0;
-    }
-
-    uint256[50] private __gap;
 }
