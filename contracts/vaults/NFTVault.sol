@@ -170,6 +170,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Value of floor set by the DAO. Only used if `daoFloorOverride` is true
     uint256 private overriddenFloorValueETH;
 
+    uint256 public minJPEGToLock;
     /// @notice The trait value multiplier for non floor NFTs. See {applyTraitBoost} for more info.
     mapping(bytes32 => Rate) public nftTypeValueMultiplier;
     /// @notice The JPEG locks. See {applyTraitBoost} for more info.
@@ -330,6 +331,29 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return (nftValue * _ethPriceUSD()) / 1 ether;
     }
 
+    /// @param _nftType The NFT type to calculate the JPEG lock amount for
+    /// @return The JPEG to lock for the specified `_nftType`
+    function calculateJPEGToLock(bytes32 _nftType)
+        public
+        view
+        returns (uint256)
+    {
+        Rate memory multiplier = nftTypeValueMultiplier[_nftType];
+
+        if (multiplier.numerator == 0 || multiplier.denominator == 0) return 0;
+
+        return
+            (getFloorETH() *
+                1 ether *
+                multiplier.numerator *
+                settings.creditLimitRate.numerator *
+                settings.valueIncreaseLockRate.numerator) /
+            multiplier.denominator /
+            settings.creditLimitRate.denominator /
+            settings.valueIncreaseLockRate.denominator /
+            _jpegPriceETH();
+    }
+
     /// @param _nftIndex The NFT to return the credit limit of
     /// @return The PUSD credit limit of the NFT at index `_nftIndex`.
     function getCreditLimit(uint256 _nftIndex) external view returns (uint256) {
@@ -406,7 +430,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows to execute multiple actions in a single transaction.
     /// @param _actions The actions to execute.
-    /// @param _datas The abi encoded parameters for the actions to execute. 
+    /// @param _datas The abi encoded parameters for the actions to execute.
     function doActions(uint8[] calldata _actions, bytes[] calldata _datas)
         external
         nonReentrant
@@ -653,6 +677,13 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         fallbackOracle = _fallback;
     }
 
+    /// @notice Allows the DAO to change the minimum amount of JPEG to lock to unlock the trait boost
+    function setMinJPEGToLock(uint256 _newAmount) external onlyRole(DAO_ROLE) {
+        if (_newAmount == 0) revert InvalidAmount(_newAmount);
+
+        minJPEGToLock = _newAmount;
+    }
+
     /// @dev See {applyTraitBoost}
     function _applyTraitBoost(uint256 _nftIndex, uint256 _unlockAt)
         internal
@@ -665,17 +696,10 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (block.timestamp >= _unlockAt || jpegLock.unlockAt >= _unlockAt)
             revert InvalidUnlockTime(_unlockAt);
 
-        Rate memory multiplier = nftTypeValueMultiplier[nftType];
+        uint256 jpegToLock = calculateJPEGToLock(nftType);
 
-        uint256 jpegToLock = (getFloorETH() *
-            1 ether *
-            multiplier.numerator *
-            settings.creditLimitRate.numerator *
-            settings.valueIncreaseLockRate.numerator) /
-            multiplier.denominator /
-            settings.creditLimitRate.denominator /
-            settings.valueIncreaseLockRate.denominator /
-            _jpegPriceETH();
+        if (minJPEGToLock >= jpegToLock)
+            revert InvalidNFTType(nftType);
 
         uint256 previousLockValue = jpegLock.lockedValue;
         address previousOwner = jpegLock.owner;
