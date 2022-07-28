@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import { task } from "hardhat/config";
-import { CryptoPunksHelper } from "../types";
 
 task("configure-punksHelper", "Configures the CryptoPunksHelper contract")
 	.setAction(async (_, { network, ethers }) => {
@@ -18,7 +17,7 @@ task("configure-punksHelper", "Configures the CryptoPunksHelper contract")
 		const [deployer] = await ethers.getSigners();
 		console.log("Deployer: ", deployer.address);
 
-		const punksHelper = <CryptoPunksHelper> await ethers.getContractAt(
+		const punksHelper = await ethers.getContractAt(
 			"CryptoPunksHelper",
 			config.punksHelper
 		  );
