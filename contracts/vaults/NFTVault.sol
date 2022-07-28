@@ -435,6 +435,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         nonReentrant
     {
+        if (_actions.length != _datas.length)
+            revert();
         bool accrueCalled;
         for (uint256 i; i < _actions.length; ++i) {
             uint8 action = _actions[i];
