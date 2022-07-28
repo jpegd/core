@@ -191,6 +191,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256[] nfts;
     }
 
+    /// @notice This function is only called once during deployment of the proxy contract. It's not called after upgrades.
     /// @param _stablecoin PUSD address
     /// @param _nftContract The NFT contrat address. It could also be the address of an helper contract
     /// if the target NFT isn't an ERC721 (CryptoPunks as an example)
@@ -279,6 +280,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @dev Function called by the {ProxyAdmin} contract during the upgrade process.
+    /// Only called on existing vaults where the `initialize` function has already been called.
+    /// It won't be called in new deployments.
     /// Sets the JPEG token address, migrates overridden floor to the new `overriddenFloorValueETH` variable,
     /// clears the `unused1` mapping and sets `DAO_ROLE` as admin for the `SETTER_ROLE`.
     function finalizeUpgrade(IERC20Upgradeable _jpeg, bytes32[] memory _toClear)
