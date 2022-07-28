@@ -39,6 +39,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error ZeroAddress();
     error InvalidOracleResults();
     error NoOracleSet();
+    error UnknownAction(uint8 action);
 
     event PositionOpened(address indexed owner, uint256 indexed index);
     event Borrowed(
@@ -485,6 +486,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             } else if (action == ACTION_UNLOCK_JPEG) {
                 uint256 nftIndex = abi.decode(_datas[i], (uint256));
                 _unlockJPEG(nftIndex);
+            } else {
+                revert UnknownAction(action);
             }
         }
     }
