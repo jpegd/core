@@ -11,6 +11,8 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 
 		if (!config.pusd)
 			throw "No PUSD address in network's config file";
+		if (!config.jpeg)
+			throw "No JPEG address in network's config file";
 		if (!config.ethOracle)
 			throw "No ETHOracle address in network's config file";
 		if (!config.cigStaking)
@@ -53,6 +55,7 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 		const NFTVault = await ethers.getContractFactory("NFTVault");
 		const nftVault = await upgrades.deployProxy(NFTVault, [
 			config.pusd,
+			config.jpeg,
 			vaultConfig.nft,
 			config.ethOracle,
 			vaultConfig.floorOracle,

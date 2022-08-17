@@ -1,0 +1,42 @@
+{
+    "nft": "0x641f90995C94110A803007225CD7C352e3fc8fBC",
+    "floorOracle": "0x09E4291E18A11892f3baA0d524Cfcd59f1918Ea2",
+    "debtInterestApr": [
+        2,
+        100
+    ],
+    "creditLimitRate": [
+        32,
+        100
+    ],
+    "liquidationLimitRate": [
+        33,
+        100
+    ],
+    "cigStakedCreditLimitRate": [
+        39,
+        100
+    ],
+    "cigStakedLiquidationLimitRate": [
+        40,
+        100
+    ],
+    "valueIncreaseLockRate": [
+        25,
+        100
+    ],
+    "organizationFeeRate": [
+        5,
+        1000
+    ],
+    "insurancePurchaseRate": [
+        5,
+        100
+    ],
+    "insuranceLiquidationPenaltyRate": [
+        25,
+        100
+    ],
+    "insuranceRepurchaseLimit": 259200,
+    "borrowAmountCap": "3000000000000000000000000"
+}
