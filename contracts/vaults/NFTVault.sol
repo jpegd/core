@@ -348,15 +348,16 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         if (multiplier.numerator == 0 || multiplier.denominator == 0) return 0;
 
+        uint256 floorETH = getFloorETH();
         return
-            (getFloorETH() *
+            (((floorETH * multiplier.numerator) /
+                multiplier.denominator -
+                floorETH) *
                 1 ether *
-                multiplier.numerator *
-                settings.creditLimitRate.numerator *
-                settings.valueIncreaseLockRate.numerator) /
-            multiplier.denominator /
-            settings.creditLimitRate.denominator /
+                settings.valueIncreaseLockRate.numerator *
+                settings.creditLimitRate.numerator) /
             settings.valueIncreaseLockRate.denominator /
+            settings.creditLimitRate.denominator /
             _jpegPrice;
     }
 
@@ -441,8 +442,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         nonReentrant
     {
-        if (_actions.length != _datas.length)
-            revert();
+        if (_actions.length != _datas.length) revert();
         bool accrueCalled;
         for (uint256 i; i < _actions.length; ++i) {
             uint8 action = _actions[i];
@@ -708,8 +708,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         uint256 jpegToLock = calculateJPEGToLock(nftType, _jpegPriceETH());
 
-        if (minJPEGToLock >= jpegToLock)
-            revert InvalidNFTType(nftType);
+        if (minJPEGToLock >= jpegToLock) revert InvalidNFTType(nftType);
 
         uint256 previousLockValue = jpegLock.lockedValue;
         address previousOwner = jpegLock.owner;
@@ -1098,8 +1097,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IUniswapV2Oracle oracle = jpegOracle;
         if (address(oracle) == address(0)) revert NoOracleSet();
         result = oracle.consultAndUpdateIfNecessary(address(jpeg), 1 ether);
-        if (result == 0)
-            revert InvalidOracleResults();
+        if (result == 0) revert InvalidOracleResults();
     }
 
     /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
