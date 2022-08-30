@@ -10,6 +10,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
 import "../interfaces/IJPEGCardsCigStaking.sol";
+import "../interfaces/IUniswapV2Oracle.sol";
 
 /// @title NFT lending vault
 /// @notice This contracts allows users to borrow PUSD using NFTs as collateral.
@@ -129,7 +130,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Chainlink ETH/USD price feed
     IAggregatorV3Interface public ethAggregator;
     /// @notice Chainlink JPEG/USD price feed
-    IAggregatorV3Interface public jpegAggregator;
+    IUniswapV2Oracle public jpegOracle;
     /// @notice Chainlink NFT floor oracle
     IAggregatorV3Interface public floorOracle;
     /// @notice Chainlink NFT fallback floor oracle
@@ -336,8 +337,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @param _nftType The NFT type to calculate the JPEG lock amount for
+    /// @param _jpegPrice The JPEG price in ETH (18 decimals)
     /// @return The JPEG to lock for the specified `_nftType`
-    function calculateJPEGToLock(bytes32 _nftType)
+    function calculateJPEGToLock(bytes32 _nftType, uint256 _jpegPrice)
         public
         view
         returns (uint256)
@@ -355,7 +357,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             multiplier.denominator /
             settings.creditLimitRate.denominator /
             settings.valueIncreaseLockRate.denominator /
-            _jpegPriceETH();
+            _jpegPrice;
     }
 
     /// @param _nftIndex The NFT to return the credit limit of
@@ -664,14 +666,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @notice Allows the DAO to set the JPEG oracle
-    /// @param _aggregator new oracle address
-    function setJPEGAggregator(IAggregatorV3Interface _aggregator)
+    /// @param _oracle new oracle address
+    function setjpegOracle(IUniswapV2Oracle _oracle)
         external
         onlyRole(DAO_ROLE)
     {
-        if (address(_aggregator) == address(0)) revert ZeroAddress();
+        if (address(_oracle) == address(0)) revert ZeroAddress();
 
-        jpegAggregator = _aggregator;
+        jpegOracle = _oracle;
     }
 
     /// @notice Allows the DAO to change fallback oracle
@@ -704,7 +706,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (block.timestamp >= _unlockAt || jpegLock.unlockAt >= _unlockAt)
             revert InvalidUnlockTime(_unlockAt);
 
-        uint256 jpegToLock = calculateJPEGToLock(nftType);
+        uint256 jpegToLock = calculateJPEGToLock(nftType, _jpegPriceETH());
 
         if (minJPEGToLock >= jpegToLock)
             revert InvalidNFTType(nftType);
@@ -1091,11 +1093,13 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @dev Returns the current JPEG price in ETH
-    /// @return The current JPEG price, 18 decimals
-    function _jpegPriceETH() internal view returns (uint256) {
-        IAggregatorV3Interface aggregator = jpegAggregator;
-        if (address(aggregator) == address(0)) revert NoOracleSet();
-        return _normalizeAggregatorAnswer(aggregator);
+    /// @return result The current JPEG price, 18 decimals
+    function _jpegPriceETH() internal returns (uint256 result) {
+        IUniswapV2Oracle oracle = jpegOracle;
+        if (address(oracle) == address(0)) revert NoOracleSet();
+        result = oracle.consultAndUpdateIfNecessary(address(jpeg), 1 ether);
+        if (result == 0)
+            revert InvalidOracleResults();
     }
 
     /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
