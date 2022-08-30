@@ -736,15 +736,15 @@ describe("NFTVault", () => {
 
     await nftVault.connect(dao).setjpegOracle(jpegOracle.address);
 
-    await jpeg.mint(user.address, units(40000));
-    await jpeg.connect(user).approve(nftVault.address, units(40000));
+    await jpeg.mint(user.address, units(36000));
+    await jpeg.connect(user).approve(nftVault.address, units(36000));
 
     await nftVault.connect(user).applyTraitBoost(index, timestamp + 1000);
 
     expect(await nftVault.getNFTValueUSD(index)).to.equal(units(1500000));
 
     expect(await jpeg.balanceOf(user.address)).to.equal(0);
-    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(40000));
+    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(36000));
 
     await expect(nftVault.unlockJPEG(index)).to.be.revertedWith("Unauthorized()");
     await expect(nftVault.connect(user).unlockJPEG(index)).to.be.revertedWith("Unauthorized()");
@@ -769,8 +769,8 @@ describe("NFTVault", () => {
 
     await nftVault.connect(dao).setjpegOracle(jpegOracle.address);
 
-    await jpeg.mint(user.address, units(40000));
-    await jpeg.connect(user).approve(nftVault.address, units(40000));
+    await jpeg.mint(user.address, units(36000));
+    await jpeg.connect(user).approve(nftVault.address, units(36000));
 
     await stablecoin.connect(user).approve(nftVault.address, borrowAmount1);
 
@@ -791,7 +791,7 @@ describe("NFTVault", () => {
 
     const lock = await nftVault.lockPositions(index1);
     expect(lock.owner).to.equal(user.address);
-    expect(lock.lockedValue).to.equal(units(40000));
+    expect(lock.lockedValue).to.equal(units(36000));
     expect(lock.unlockAt).to.equal(unlockTime);
 
     expect((await nftVault.positions(index1)).debtPrincipal).to.equal(borrowAmount1);
@@ -806,14 +806,14 @@ describe("NFTVault", () => {
     await erc721.connect(user).approve(nftVault.address, index);
     await nftVault.connect(dao).setjpegOracle(jpegOracle.address);
 
-    await jpeg.mint(user.address, units(80000));
-    await jpeg.connect(user).approve(nftVault.address, units(800000));
+    await jpeg.mint(user.address, units(72000));
+    await jpeg.connect(user).approve(nftVault.address, units(720000));
 
     const timestamp = (await ethers.provider.getBlock("latest")).timestamp;
     await nftVault.connect(user).applyTraitBoost(index, timestamp + 1000);
 
-    expect(await jpeg.balanceOf(user.address)).to.equal(units(40000));
-    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(40000));
+    expect(await jpeg.balanceOf(user.address)).to.equal(units(36000));
+    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(36000));
 
     await jpegOracle.setPrice(2000000000000000);
 
@@ -821,23 +821,23 @@ describe("NFTVault", () => {
 
     await nftVault.connect(user).applyTraitBoost(index, timestamp + 1001);
 
-    expect(await jpeg.balanceOf(user.address)).to.equal(units(60000));
-    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(20000));
+    expect(await jpeg.balanceOf(user.address)).to.equal(units(54000));
+    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(18000));
 
     await jpegOracle.setPrice(500000000000000);
 
     await nftVault.connect(user).applyTraitBoost(index, timestamp + 1002);
 
     expect(await jpeg.balanceOf(user.address)).to.equal(0);
-    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(80000));
+    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(72000));
 
-    await jpeg.mint(dao.address, units(80000));
-    await jpeg.connect(dao).approve(nftVault.address, units(800000));
+    await jpeg.mint(dao.address, units(72000));
+    await jpeg.connect(dao).approve(nftVault.address, units(720000));
 
     await nftVault.connect(dao).applyTraitBoost(index, timestamp + 1003);
 
-    expect(await jpeg.balanceOf(user.address)).to.equal(units(80000));
-    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(80000));
+    expect(await jpeg.balanceOf(user.address)).to.equal(units(72000));
+    expect(await jpeg.balanceOf(nftVault.address)).to.equal(units(72000));
     expect(await jpeg.balanceOf(dao.address)).to.equal(0);
   });
 
