@@ -21,6 +21,7 @@ import {
     IAggregatorV3Interface__factory,
     CryptoPunks,
     ERC721,
+    UniswapV2MockOracle
 } from "../types";
 import {
     units,
@@ -55,7 +56,7 @@ describe("NFTVaultUpgrade", () => {
     let nftVault: NFTVault,
         punks: CryptoPunks,
         usdcVault: FungibleAssetVaultForDAO,
-        jpegOracle: MockV3Aggregator,
+        jpegOracle: UniswapV2MockOracle,
         ethOracle: IAggregatorV3Interface,
         usd_oracle: IAggregatorV3Interface,
         floorOracle: IAggregatorV3Interface,
@@ -161,8 +162,10 @@ describe("NFTVaultUpgrade", () => {
         const StableCoin = await ethers.getContractFactory("StableCoin");
         stablecoin = StableCoin.attach("0x466a756e9a7401b5e2444a3fcb3c2c12fbea0a54");
 
+        const MockOracle = await ethers.getContractFactory("UniswapV2MockOracle");
+        jpegOracle = await MockOracle.deploy(1000000000000000);
+
         const MockAggregator = await ethers.getContractFactory("MockV3Aggregator");
-        jpegOracle = await MockAggregator.deploy(8, 100000);
 
         ethOracle = IAggregatorV3Interface__factory.connect("0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", ethers.provider);
 
@@ -664,8 +667,8 @@ describe("NFTVaultUpgrade", () => {
     });
 
     it("should allow the DAO to set JPEG oracle", async () => {
-        await expect(nftVault.connect(dao).setJPEGAggregator(ZERO_ADDRESS)).to.be.revertedWith("ZeroAddress()");
-        await nftVault.connect(dao).setJPEGAggregator(jpegOracle.address);
+        await expect(nftVault.connect(dao).setjpegOracle(ZERO_ADDRESS)).to.be.revertedWith("ZeroAddress()");
+        await nftVault.connect(dao).setjpegOracle(jpegOracle.address);
     });
 
 
@@ -741,7 +744,7 @@ describe("NFTVaultUpgrade", () => {
 
         const timestamp = (await ethers.provider.getBlock("latest")).timestamp;
 
-        const jpegToLock = floorETH.mul(10 ** 8).mul(10).mul(32).div(100).mul(25).div(100).div(100000);
+        const jpegToLock = floorETH.mul(10).sub(floorETH).mul(10 ** 8).mul(32).div(100).mul(25).div(100).div(100000);
 
         await jpeg.connect(dao).mint(user._address, jpegToLock);
         await jpeg.connect(user).approve(nftVault.address, jpegToLock);
@@ -771,7 +774,7 @@ describe("NFTVaultUpgrade", () => {
         await nftVault.connect(dao).setNFTType([index], apeHash);
 
         const { answer: floorETH } = await floorOracle.latestRoundData();
-        const jpegToLock = floorETH.mul(10 ** 8).mul(10).mul(32).div(100).mul(25).div(100).div(100000);
+        const jpegToLock = floorETH.mul(10).sub(floorETH).mul(10 ** 8).mul(32).div(100).mul(25).div(100).div(100000);
 
         await jpeg.connect(dao).mint(user._address, jpegToLock.mul(2));
         await jpeg.connect(user).approve(nftVault.address, jpegToLock.mul(100));
@@ -782,7 +785,7 @@ describe("NFTVaultUpgrade", () => {
         expect(await jpeg.balanceOf(user._address)).to.equal(jpegToLock);
         expect(await jpeg.balanceOf(nftVault.address)).to.equal(jpegToLock);
 
-        await jpegOracle.updateAnswer(200000);
+        await jpegOracle.setPrice(2000000000000000);
 
         await expect(nftVault.connect(user).applyTraitBoost(index, timestamp + 1000)).to.be.revertedWith("InvalidUnlockTime(" + (timestamp + 1000) + ")");
 
@@ -791,7 +794,7 @@ describe("NFTVaultUpgrade", () => {
         expect(await jpeg.balanceOf(user._address)).to.equal(jpegToLock.mul(3).div(2));
         expect(await jpeg.balanceOf(nftVault.address)).to.equal(jpegToLock.div(2));
 
-        await jpegOracle.updateAnswer(50000);
+        await jpegOracle.setPrice(500000000000000);
 
         await nftVault.connect(user).applyTraitBoost(index, timestamp + 1002);
 
