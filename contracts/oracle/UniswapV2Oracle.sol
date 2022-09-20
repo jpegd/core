@@ -101,7 +101,7 @@ contract UniswapV2Oracle {
         if (token == token0) return price0Avg.mul(amountIn).decode144();
         else {
             require(token == token1, "INVALID_TOKEN");
-            return price0Avg.mul(amountIn).decode144();
+            return price1Avg.mul(amountIn).decode144();
         }
     }
 
