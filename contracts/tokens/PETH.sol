@@ -22,7 +22,7 @@ contract PETH is
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
-    constructor() ERC20("PETH", "PETH") {
+    constructor() ERC20("JPEG\xE2\x80\x99d ETH", "pETH") {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
     }
 
@@ -38,7 +38,7 @@ contract PETH is
     function mint(address to, uint256 amount) external {
         require(
             hasRole(MINTER_ROLE, _msgSender()),
-            "StableCoin: must have minter role to mint"
+            "PETH: must have minter role to mint"
         );
         _mint(to, amount);
     }
@@ -52,7 +52,7 @@ contract PETH is
     function pause() external {
         require(
             hasRole(PAUSER_ROLE, _msgSender()),
-            "StableCoin: must have pauser role to pause"
+            "PETH: must have pauser role to pause"
         );
         _pause();
     }
@@ -66,7 +66,7 @@ contract PETH is
     function unpause() external {
         require(
             hasRole(PAUSER_ROLE, _msgSender()),
-            "StableCoin: must have pauser role to unpause"
+            "PETH: must have pauser role to unpause"
         );
         _unpause();
     }
