@@ -2,27 +2,27 @@
     "nft": "0x641f90995C94110A803007225CD7C352e3fc8fBC",
     "floorOracle": "0x09E4291E18A11892f3baA0d524Cfcd59f1918Ea2",
     "debtInterestApr": [
-        2,
+        15,
         100
     ],
     "creditLimitRate": [
-        32,
+        35,
         100
     ],
     "liquidationLimitRate": [
-        33,
+        36,
         100
     ],
     "cigStakedCreditLimitRate": [
-        39,
+        44,
         100
     ],
     "cigStakedLiquidationLimitRate": [
-        40,
+        45,
         100
     ],
     "valueIncreaseLockRate": [
-        25,
+        10,
         100
     ],
     "organizationFeeRate": [
