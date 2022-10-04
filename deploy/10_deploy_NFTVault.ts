@@ -99,3 +99,88 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 
 		console.log("All done.");
 	});
+
+task("deploy-nftVaultImpl", "Upgrades the NFTVault contract")
+	.setAction(async ({ }, { network, ethers, run, upgrades }) => {
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
+		
+		const NFTVault = await ethers.getContractFactory("PETHNFTVault");
+		const nftVault = await NFTVault.deploy()
+		await nftVault.deployed()
+		console.log("deploy at: ", nftVault.address)
+
+		if (network.name != "hardhat") {
+			console.log("Verifying NFTVault");
+			await run("verify:verify", {
+				address: nftVault.address,
+				constructorArguments: [],
+			});
+		}
+	})
+
+task("deploy-jpegOracleAggregator", "Deploys the JPEGOraclesAggregator contract")
+	.setAction(async ({  }, { network, ethers, run, upgrades }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
+
+		if (!config.jpeg)
+			throw "No jpeg address in network's config file";
+
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
+		
+		const JPEGOraclesAggregator = await ethers.getContractFactory("JPEGOraclesAggregator");
+		const oracle = await JPEGOraclesAggregator.deploy(config.jpeg)
+		console.log("deployed at: ", oracle.address)
+		
+		if (network.name != "hardhat") {
+			console.log("Verifying oracle");
+			await run("verify:verify", {
+				address: oracle.address,
+				constructorArguments: [config.jpeg],
+			});
+		}
+	})
+
+task("deploy-nftprovider", "Deploys the NFTValueProvider contract")
+	.addParam("vaultconfig", "A JSON file containing the vault's configuration", undefined, types.inputFile)
+	.addParam("collection", "The collection name", undefined, types.string)
+	.setAction(async ({ vaultconfig, collection }, { network, ethers, run, upgrades }) => {
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
+
+		if (!config.jpeg)
+			throw "No jpeg address in network's config file";
+		if (!config.jpeg)
+			throw "No jpeg address in network's config file";
+			
+		const vaultConfig = await JSON.parse(fs.readFileSync(vaultconfig).toString());
+		if (!vaultConfig.jpegOraclesAggregator)
+			throw "No jpegOraclesAggregator address in network's config file";
+		if (!vaultConfig.valueIncreaseLockRate)
+			throw "No valueIncreaseLockRate field in network's config file";
+			
+		const [deployer] = await ethers.getSigners();
+		console.log("Deployer: ", deployer.address);
+		
+		const NFTValueProvider = await ethers.getContractFactory("NFTValueProvider");
+		const nftValueprovider = await upgrades.deployProxy(NFTValueProvider, [
+			config.jpeg,
+			vaultConfig.jpegOraclesAggregator,
+			vaultConfig.valueIncreaseLockRate,
+			"0",
+		]);
+		console.log("deployed at: ", nftValueprovider.address)
+
+		config["nftValueProvider-" + collection] = nftValueprovider.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
+
+		if (network.name != "hardhat") {
+			console.log("Verifying oracle");
+			await run("verify:verify", {
+				address: nftValueprovider.address,
+				constructorArguments: [],
+			});
+		}
+	})

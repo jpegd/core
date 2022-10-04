@@ -5,4 +5,9 @@ interface IUniswapV2Oracle {
     function consultAndUpdateIfNecessary(address token, uint256 amountIn)
         external
         returns (uint256);
+            
+    function consultUpdated(address token, uint256 amountIn)
+        external
+        returns (uint256);
+
 }

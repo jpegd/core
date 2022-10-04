@@ -18,6 +18,17 @@ contract UniswapV2MockOracle is IUniswapV2Oracle {
         return price;
     }
 
+         function consultUpdated(address token, uint256 amountIn)
+        external
+        view
+        override
+        returns (uint256 amountOut)
+    {
+        require(token != address(0));
+        return amountIn * price / 1e18;
+    }
+
+
     function setPrice(uint256 _price) external {
         price = _price;
     }
