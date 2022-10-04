@@ -17,7 +17,7 @@
     "@nomiclabs/hardhat-web3": "^2.0.0",
     "@openzeppelin/contracts": "^4.5.0",
     "@openzeppelin/contracts-upgradeable": "^4.5.2",
-    "@openzeppelin/hardhat-upgrades": "^1.11.0",
+    "@openzeppelin/hardhat-upgrades": "^1.21.0",
     "@openzeppelin/test-helpers": "^0.5.10",
     "@typechain/ethers-v5": "^7.0.0",
     "@typechain/hardhat": "^2.0.1",
@@ -38,6 +38,9 @@
   },
   "dependencies": {
     "@types/node": "^17.0.25",
+    "@uniswap/lib": "^4.0.1-alpha",
+    "@uniswap/v2-core": "^1.0.1",
+    "@uniswap/v3-core": "^1.0.1",
     "dotenv": "^8.2.0",
     "merkletreejs": "^0.2.31"
   }
