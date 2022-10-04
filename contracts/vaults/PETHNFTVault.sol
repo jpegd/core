@@ -10,7 +10,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
 import "../interfaces/IJPEGCardsCigStaking.sol";
-import "../interfaces/IUniswapV2Oracle.sol";
+import "../interfaces/INFTValueProvider.sol";
 
 /// @title NFT lending vault
 /// @notice This contracts allows users to borrow PETH using NFTs as collateral.
@@ -39,7 +39,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error PositionInsuranceNotExpired(uint256 nftIndex);
     error ZeroAddress();
     error InvalidOracleResults();
-    error NoOracleSet();
     error UnknownAction(uint8 action);
 
     event PositionOpened(address indexed owner, uint256 indexed index);
@@ -58,18 +57,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     );
     event Repurchased(address indexed owner, uint256 indexed index);
     event InsuranceExpired(address indexed owner, uint256 indexed index);
-    event DaoFloorChanged(uint256 newFloor);
-    event JPEGLocked(
-        address indexed owner,
-        uint256 indexed index,
-        uint256 amount,
-        uint256 unlockTime
-    );
-    event JPEGUnlocked(
-        address indexed owner,
-        uint256 indexed index,
-        uint256 amount
-    );
 
     enum BorrowType {
         NOT_CONFIRMED,
@@ -91,7 +78,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint128 denominator;
     }
 
-    struct JPEGLock {
+    /// @custom:oz-renamed-from JPEGLock
+    struct Unused13 {
         address owner;
         uint256 unlockAt;
         uint256 lockedValue;
@@ -103,7 +91,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         Rate liquidationLimitRate;
         Rate cigStakedCreditLimitRate;
         Rate cigStakedLiquidationLimitRate;
-        Rate valueIncreaseLockRate;
+        /// @custom:oz-renamed-from valueIncreaseLockRate
+        Rate unused12;
         Rate organizationFeeRate;
         Rate insurancePurchaseRate;
         Rate insuranceLiquidationPenaltyRate;
@@ -123,29 +112,29 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     //no accrue required
     uint8 private constant ACTION_REPURCHASE = 100;
     uint8 private constant ACTION_CLAIM_NFT = 101;
-    uint8 private constant ACTION_TRAIT_BOOST = 102;
-    uint8 private constant ACTION_UNLOCK_JPEG = 103;
 
     IStableCoin public stablecoin;
-    /// @notice Chainlink JPEG/ETH price feed
-    IUniswapV2Oracle public jpegOracle;
-    /// @notice Chainlink NFT floor oracle
-    IAggregatorV3Interface public floorOracle;
-    /// @notice Chainlink NFT fallback floor oracle
-    IAggregatorV3Interface public fallbackOracle;
-    /// @notice The JPEG token
-    /// @custom:oz-renamed-from jpegLocker
-    IERC20Upgradeable public jpeg;
+    /// @notice The JPEG trait boost locker contract
+    /// @custom:oz-renamed-from jpegOracle
+    INFTValueProvider public nftValueProvider;
+    /// @custom:oz-retyped-from IAggregatorV3Interface
+    /// @custom:oz-renamed-from floorOracle
+    address private unused8;
+    /// @custom:oz-retyped-from IAggregatorV3Interface
+    /// @custom:oz-renamed-from fallbackOracle
+    address private unused9;
+    /// @custom:oz-retyped-from IERC20Upgradeable
+    /// @custom:oz-renamed-from jpeg
+    address private unused3; //Unused after upgrade
     /// @notice JPEGCardsCigStaking, cig stakers get an higher credit limit rate and liquidation limit rate.
     /// Immediately reverts to normal rates if the cig is unstaked.
     IJPEGCardsCigStaking public cigStaking;
     IERC721Upgradeable public nftContract;
 
-    /// @notice If true, the floor price won't be fetched using the Chainlink oracle but
-    /// a value set by the DAO will be used instead
-    bool public daoFloorOverride;
-    // @notice If true, the floor price will be fetched using the fallback oracle
-    bool public useFallbackOracle;
+    /// @custom:oz-renamed-from daoFloorOverride
+    bool private unused10;
+    /// @custom:oz-renamed-from useFallbackOracle
+    bool private unused11;
     /// @notice Total outstanding debt
     uint256 public totalDebtAmount;
     /// @dev Last time debt was accrued. See {accrue} for more info
@@ -164,17 +153,17 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     mapping(bytes32 => uint256) private unused1; //unused after upgrade
     /// @custom:oz-renamed-from nftValueETH
     mapping(uint256 => uint256) private unused2; //unused after upgrade
-    //bytes32(0) is floor
-    mapping(uint256 => bytes32) public nftTypes;
+    /// @custom:oz-renamed-from nftTypes
+    mapping(uint256 => bytes32) private unused4; //unused after upgrade
 
-    /// @notice Value of floor set by the DAO. Only used if `daoFloorOverride` is true
-    uint256 private overriddenFloorValueETH;
-
-    uint256 public minJPEGToLock;
-    /// @notice The trait value multiplier for non floor NFTs. See {applyTraitBoost} for more info.
-    mapping(bytes32 => Rate) public nftTypeValueMultiplier;
-    /// @notice The JPEG locks. See {applyTraitBoost} for more info.
-    mapping(uint256 => JPEGLock) public lockPositions;
+     /// @custom:oz-renamed-from overriddenFloorValueETH
+    uint256 private unused5;
+    /// @custom:oz-renamed-from minJPEGToLock
+    uint256 private unused6;
+    /// @custom:oz-renamed-from nftTypeValueMultiplier
+    mapping(bytes32 => Rate) private unused7;
+    /// @custom:oz-renamed-from lockPositions
+    mapping(uint256 => Unused13) private unused13;
 
     /// @dev Checks if the provided NFT index is valid
     /// @param nftIndex The index to check
@@ -185,26 +174,16 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _;
     }
 
-    struct NFTCategoryInitializer {
-        bytes32 hash;
-        Rate valueMultiplier;
-        uint256[] nfts;
-    }
-
     /// @notice This function is only called once during deployment of the proxy contract. It's not called after upgrades.
     /// @param _stablecoin PETH address
-    /// @param _nftContract The NFT contrat address. It could also be the address of an helper contract
+    /// @param _nftContract The NFT contract address. It could also be the address of an helper contract
     /// if the target NFT isn't an ERC721 (CryptoPunks as an example)
-    /// @param _floorOracle Chainlink floor oracle address
-    /// @param _typeInitializers Used to initialize NFT categories with their value and NFT indexes.
-    /// Floor NFT shouldn't be initialized this way
+    /// @param _cigStaking Cig staking address
     /// @param _settings Initial settings used by the contract
     function initialize(
         IStableCoin _stablecoin,
-        IERC20Upgradeable _jpeg,
         IERC721Upgradeable _nftContract,
-        IAggregatorV3Interface _floorOracle,
-        NFTCategoryInitializer[] calldata _typeInitializers,
+        INFTValueProvider _nftValueProvider,
         IJPEGCardsCigStaking _cigStaking,
         VaultSettings calldata _settings
     ) external initializer {
@@ -221,7 +200,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _validateRateBelowOne(_settings.liquidationLimitRate);
         _validateRateBelowOne(_settings.cigStakedCreditLimitRate);
         _validateRateBelowOne(_settings.cigStakedLiquidationLimitRate);
-        _validateRateBelowOne(_settings.valueIncreaseLockRate);
         _validateRateBelowOne(_settings.organizationFeeRate);
         _validateRateBelowOne(_settings.insurancePurchaseRate);
         _validateRateBelowOne(_settings.insuranceLiquidationPenaltyRate);
@@ -255,46 +233,21 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         ) revert InvalidRate(_settings.cigStakedLiquidationLimitRate);
 
         stablecoin = _stablecoin;
-        jpeg = _jpeg;
-        floorOracle = _floorOracle;
         cigStaking = _cigStaking;
         nftContract = _nftContract;
-
+        nftValueProvider = _nftValueProvider;
+        
         settings = _settings;
-
-        //initializing the categories
-        for (uint256 i; i < _typeInitializers.length; ++i) {
-            NFTCategoryInitializer memory initializer = _typeInitializers[i];
-            if (initializer.hash == bytes32(0))
-                revert InvalidNFTType(initializer.hash);
-            _validateRateAboveOne(initializer.valueMultiplier);
-            nftTypeValueMultiplier[initializer.hash] = initializer
-                .valueMultiplier;
-            for (uint256 j; j < initializer.nfts.length; j++) {
-                nftTypes[initializer.nfts[j]] = initializer.hash;
-            }
-        }
     }
 
     /// @dev Function called by the {ProxyAdmin} contract during the upgrade process.
     /// Only called on existing vaults where the `initialize` function has already been called.
     /// It won't be called in new deployments.
-    /// Sets the JPEG token address, migrates overridden floor to the new `overriddenFloorValueETH` variable,
-    /// clears the `unused1` mapping and sets `DAO_ROLE` as admin for the `SETTER_ROLE`.
-    function finalizeUpgrade(IERC20Upgradeable _jpeg, bytes32[] memory _toClear)
-        external
-    {
-        require(address(jpeg) == address(0)); //already finalized
-        if (address(_jpeg) == address(0)) revert ZeroAddress();
+    function finalizeUpgrade(INFTValueProvider _provider) external onlyRole(SETTER_ROLE) {
+        if (address(_provider) == address(0))
+            revert ZeroAddress();
 
-        _setRoleAdmin(SETTER_ROLE, DAO_ROLE);
-
-        jpeg = _jpeg;
-        overriddenFloorValueETH = unused1[bytes32(0)];
-
-        for (uint256 i; i < _toClear.length; ++i) {
-            delete unused1[_toClear[i]];
-        }
+        nftValueProvider = _provider;
     }
 
     /// @notice Returns the number of open positions
@@ -312,41 +265,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _nftIndex The NFT to return the value of
     /// @return The value in ETH of the NFT at index `_nftIndex`, with 18 decimals.
     function getNFTValueETH(uint256 _nftIndex) public view returns (uint256) {
-        uint256 floor = getFloorETH();
-
-        bytes32 nftType = nftTypes[_nftIndex];
-        if (
-            nftType != bytes32(0) &&
-            lockPositions[_nftIndex].unlockAt > block.timestamp
-        ) {
-            Rate memory multiplier = nftTypeValueMultiplier[nftType];
-            return (floor * multiplier.numerator) / multiplier.denominator;
-        } else return floor;
-    }
-
-    /// @param _nftType The NFT type to calculate the JPEG lock amount for
-    /// @param _jpegPrice The JPEG price in ETH (18 decimals)
-    /// @return The JPEG to lock for the specified `_nftType`
-    function calculateJPEGToLock(bytes32 _nftType, uint256 _jpegPrice)
-        public
-        view
-        returns (uint256)
-    {
-        Rate memory multiplier = nftTypeValueMultiplier[_nftType];
-
-        if (multiplier.numerator == 0 || multiplier.denominator == 0) return 0;
-
-        uint256 floorETH = getFloorETH();
-        return
-            (((floorETH * multiplier.numerator) /
-                multiplier.denominator -
-                floorETH) *
-                1 ether *
-                settings.valueIncreaseLockRate.numerator *
-                settings.creditLimitRate.numerator) /
-            settings.valueIncreaseLockRate.denominator /
-            settings.creditLimitRate.denominator /
-            _jpegPrice;
+        return nftValueProvider.getNFTValueETH(_nftIndex);
     }
 
     /// @param _nftIndex The NFT to return the credit limit of
@@ -400,16 +319,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         unchecked {
             return debt - principal;
         }
-    }
-
-    /// @return The floor value for the collection, in ETH.
-    function getFloorETH() public view returns (uint256) {
-        if (daoFloorOverride) return overriddenFloorValueETH;
-        else
-            return
-                _normalizeAggregatorAnswer(
-                    useFallbackOracle ? fallbackOracle : floorOracle
-                );
     }
 
     /// @dev The {accrue} function updates the contract's state by calculating
@@ -467,46 +376,10 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                     (uint256, address)
                 );
                 _claimExpiredInsuranceNFT(nftIndex, recipient);
-            } else if (action == ACTION_TRAIT_BOOST) {
-                (uint256 nftIndex, uint256 unlockAt) = abi.decode(
-                    _datas[i],
-                    (uint256, uint256)
-                );
-                _applyTraitBoost(nftIndex, unlockAt);
-            } else if (action == ACTION_UNLOCK_JPEG) {
-                uint256 nftIndex = abi.decode(_datas[i], (uint256));
-                _unlockJPEG(nftIndex);
             } else {
                 revert UnknownAction(action);
             }
         }
-    }
-
-    /// @notice Allows users to lock JPEG tokens to unlock the trait boost for a single non floor NFT.
-    /// The trait boost is a multiplicative value increase relative to the collection's floor.
-    /// The value increase depends on the NFT's traits and it's set by the DAO.
-    /// The ETH value of the JPEG to lock is calculated by applying the `valueIncreaseLockRate` rate to the NFT's new credit limit.
-    /// The unlock time is set by the user and has to be greater than `block.timestamp` and the previous unlock time.
-    /// After the lock expires, the boost is revoked and the NFT's value goes back to floor.
-    /// If a boosted position is closed or liquidated, the JPEG remains locked and the boost will still be applied in case the NFT
-    /// is deposited again, even in case of a different owner. The locked JPEG will only be claimable by the original lock creator
-    /// once the lock expires. If the lock is renewed by the new owner, the JPEG from the previous lock will be sent back to the original
-    /// lock creator.
-    /// @dev emits a {JPEGLocked} event
-    /// @param _nftIndex The index of the NFT to boost (has to be a non floor NFT)
-    /// @param _unlockAt The lock expiration time.
-    function applyTraitBoost(uint256 _nftIndex, uint256 _unlockAt)
-        external
-        nonReentrant
-    {
-        _applyTraitBoost(_nftIndex, _unlockAt);
-    }
-
-    /// @notice Allows lock creators to unlock the JPEG associated to the NFT at index `_nftIndex`, provided the lock expired.
-    /// @dev emits a {JPEGUnlocked} event
-    /// @param _nftIndex The index of the NFT holding the lock.
-    function unlockJPEG(uint256 _nftIndex) external nonReentrant {
-        _unlockJPEG(_nftIndex);
     }
 
     /// @notice Allows users to open positions and borrow using an NFT
@@ -599,142 +472,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         onlyRole(SETTER_ROLE)
     {
         settings = _settings;
-    }
-
-    /// @notice Allows the DAO to toggle the fallback oracle
-    /// @param _useFallback Whether to use the fallback oracle
-    function toggleFallbackOracle(bool _useFallback)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        require(address(fallbackOracle) != address(0));
-        useFallbackOracle = _useFallback;
-    }
-
-    /// @notice Allows the DAO to bypass the floor oracle and override the NFT floor value
-    /// @param _newFloor The new floor
-    function overrideFloor(uint256 _newFloor) external onlyRole(DAO_ROLE) {
-        if (_newFloor == 0) revert InvalidAmount(_newFloor);
-        overriddenFloorValueETH = _newFloor;
-        daoFloorOverride = true;
-
-        emit DaoFloorChanged(_newFloor);
-    }
-
-    /// @notice Allows the DAO to stop overriding floor
-    function disableFloorOverride() external onlyRole(DAO_ROLE) {
-        daoFloorOverride = false;
-    }
-
-    /// @notice Allows the DAO to add an NFT to a specific price category
-    /// @param _nftIndexes The indexes to add to the category
-    /// @param _type The category hash
-    function setNFTType(uint256[] calldata _nftIndexes, bytes32 _type)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        if (_type != bytes32(0) && nftTypeValueMultiplier[_type].numerator == 0)
-            revert InvalidNFTType(_type);
-
-        for (uint256 i; i < _nftIndexes.length; ++i) {
-            nftTypes[_nftIndexes[i]] = _type;
-        }
-    }
-
-    /// @notice Allows the DAO to change the multiplier of an NFT category
-    /// @param _type The category hash
-    /// @param _multiplier The new multiplier
-    function setNFTTypeMultiplier(bytes32 _type, Rate calldata _multiplier)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        if (_type == bytes32(0)) revert InvalidNFTType(_type);
-        _validateRateAboveOne(_multiplier);
-        nftTypeValueMultiplier[_type] = _multiplier;
-    }
-
-    /// @notice Allows the DAO to set the JPEG oracle
-    /// @param _oracle new oracle address
-    function setjpegOracle(IUniswapV2Oracle _oracle)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        if (address(_oracle) == address(0)) revert ZeroAddress();
-
-        jpegOracle = _oracle;
-    }
-
-    /// @notice Allows the DAO to change fallback oracle
-    /// @param _fallback new fallback address
-    function setFallbackOracle(IAggregatorV3Interface _fallback)
-        external
-        onlyRole(DAO_ROLE)
-    {
-        if (address(_fallback) == address(0)) revert ZeroAddress();
-
-        fallbackOracle = _fallback;
-    }
-
-    /// @notice Allows the DAO to change the minimum amount of JPEG to lock to unlock the trait boost
-    function setMinJPEGToLock(uint256 _newAmount) external onlyRole(DAO_ROLE) {
-        if (_newAmount == 0) revert InvalidAmount(_newAmount);
-
-        minJPEGToLock = _newAmount;
-    }
-
-    /// @dev See {applyTraitBoost}
-    function _applyTraitBoost(uint256 _nftIndex, uint256 _unlockAt)
-        internal
-        validNFTIndex(_nftIndex)
-    {
-        bytes32 nftType = nftTypes[_nftIndex];
-        if (nftType == bytes32(0)) revert InvalidNFTType(nftType);
-
-        JPEGLock storage jpegLock = lockPositions[_nftIndex];
-        if (block.timestamp >= _unlockAt || jpegLock.unlockAt >= _unlockAt)
-            revert InvalidUnlockTime(_unlockAt);
-
-        uint256 jpegToLock = calculateJPEGToLock(nftType, _jpegPriceETH());
-
-        if (minJPEGToLock >= jpegToLock) revert InvalidNFTType(nftType);
-
-        uint256 previousLockValue = jpegLock.lockedValue;
-        address previousOwner = jpegLock.owner;
-
-        jpegLock.lockedValue = jpegToLock;
-        jpegLock.unlockAt = _unlockAt;
-        jpegLock.owner = msg.sender;
-
-        if (previousOwner == msg.sender) {
-            if (jpegToLock > previousLockValue)
-                jpeg.safeTransferFrom(
-                    msg.sender,
-                    address(this),
-                    jpegToLock - previousLockValue
-                );
-            else if (previousLockValue > jpegToLock)
-                jpeg.safeTransfer(msg.sender, previousLockValue - jpegToLock);
-        } else {
-            if (previousLockValue > 0)
-                jpeg.safeTransfer(previousOwner, previousLockValue);
-            jpeg.safeTransferFrom(msg.sender, address(this), jpegToLock);
-        }
-
-        emit JPEGLocked(msg.sender, _nftIndex, jpegToLock, _unlockAt);
-    }
-
-    /// @dev See {unlockJPEG}
-    function _unlockJPEG(uint256 _nftIndex) internal validNFTIndex(_nftIndex) {
-        JPEGLock memory jpegLock = lockPositions[_nftIndex];
-        if (jpegLock.owner != msg.sender) revert Unauthorized();
-
-        if (block.timestamp < jpegLock.unlockAt) revert Unauthorized();
-
-        delete lockPositions[_nftIndex];
-
-        jpeg.safeTransfer(msg.sender, jpegLock.lockedValue);
-
-        emit JPEGUnlocked(msg.sender, _nftIndex, jpegLock.lockedValue);
     }
 
     /// @dev Opens a position
@@ -1073,38 +810,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             365 days;
     }
 
-    /// @dev Returns the current JPEG price in ETH
-    /// @return result The current JPEG price, 18 decimals
-    function _jpegPriceETH() internal returns (uint256 result) {
-        IUniswapV2Oracle oracle = jpegOracle;
-        if (address(oracle) == address(0)) revert NoOracleSet();
-        result = oracle.consultAndUpdateIfNecessary(address(jpeg), 1 ether);
-        if (result == 0) revert InvalidOracleResults();
-    }
-
-    /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
-    /// @param aggregator The aggregator to fetch the answer from
-    /// @return The latest aggregator answer, normalized
-    function _normalizeAggregatorAnswer(IAggregatorV3Interface aggregator)
-        internal
-        view
-        returns (uint256)
-    {
-        (, int256 answer, , uint256 timestamp, ) = aggregator.latestRoundData();
-
-        if (answer == 0 || timestamp == 0) revert InvalidOracleResults();
-
-        uint8 decimals = aggregator.decimals();
-
-        unchecked {
-            //converts the answer to have 18 decimals
-            return
-                decimals > 18
-                    ? uint256(answer) / 10**(decimals - 18)
-                    : uint256(answer) * 10**(18 - decimals);
-        }
-    }
-
     /// @dev Checks if `r1` is greater than `r2`.
     function _greaterThan(Rate memory _r1, Rate memory _r2)
         internal
@@ -1119,13 +824,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _rate The rate to validate
     function _validateRateBelowOne(Rate memory _rate) internal pure {
         if (_rate.denominator == 0 || _rate.denominator < _rate.numerator)
-            revert InvalidRate(_rate);
-    }
-
-    /// @dev Validates a rate. The denominator must be greater than zero and less than or equal to the numerator.
-    /// @param _rate The rate to validate
-    function _validateRateAboveOne(Rate memory _rate) internal pure {
-        if (_rate.denominator == 0 || _rate.numerator < _rate.denominator)
             revert InvalidRate(_rate);
     }
 }
