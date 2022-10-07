@@ -18,7 +18,7 @@ task("deploy-punksHelper", "Deploys the CryptoPunksHelper contract")
 
 		console.log("CryptoPunksHelper deployed at: ", punksHelper.address);
 
-		config.punksHelper = punksHelper.address;
+		config.pethPunksHelper = punksHelper.address;
 		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
 		if (network.name != "hardhat") {

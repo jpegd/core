@@ -52,14 +52,11 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 		const [deployer] = await ethers.getSigners();
 		console.log("Deployer: ", deployer.address);
 
-		const NFTVault = await ethers.getContractFactory("NFTVault");
+		const NFTVault = await ethers.getContractFactory("PETHNFTVault");
 		const nftVault = await upgrades.deployProxy(NFTVault, [
-			config.pusd,
-			config.jpeg,
+			config.peth,
 			vaultConfig.nft,
-			config.ethOracle,
-			vaultConfig.floorOracle,
-			vaultConfig.specialNFTs ?? [],
+			vaultConfig.nftValueProvider,
 			config.cigStaking,
 			[
 				vaultConfig.debtInterestApr,
@@ -78,13 +75,13 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 
 		console.log("NFTVault for ", vaultConfig.nft, " deployed at: ", nftVault.address);
 
-		config["nftVault-" + vaultConfig.nft.substring(vaultConfig.nft.length - 5)] = nftVault.address;
+		config["pethNftVault-" + vaultConfig.nft.substring(vaultConfig.nft.length - 5)] = nftVault.address;
 		fs.writeFileSync(configFilePath, JSON.stringify(config));
 
 		console.log("Setting up NFTVault");
 
 		await (await nftVault.grantRole(DAO_ROLE, config.dao)).wait();
-		await (await nftVault.revokeRole(DAO_ROLE, deployer.address)).wait();
+		// await (await nftVault.revokeRole(DAO_ROLE, deployer.address)).wait();
 
 		if (network.name != "hardhat") {
 			console.log("Verifying NFTVault");
@@ -150,8 +147,6 @@ task("deploy-nftprovider", "Deploys the NFTValueProvider contract")
 		const configFilePath = path.join(__dirname, "config", network.name + ".json");
 		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
 
-		if (!config.jpeg)
-			throw "No jpeg address in network's config file";
 		if (!config.jpeg)
 			throw "No jpeg address in network's config file";
 			
