@@ -10,13 +10,14 @@ import {
 	MockV3Aggregator,
 	JPEGCardsCigStaking,
 	NFTVault,
-	StableCoin,
+	PETH,
 	TestERC20,
 	TestERC721,
 	UniswapV2MockOracle
 } from "../types";
 import {
 	units,
+	bn,
 	timeTravel,
 	days,
 	checkAlmostSame,
@@ -43,19 +44,19 @@ const apes = [
 	5314, 5577, 5795, 6145, 6915, 6965, 7191, 8219, 8498, 9265, 9280,
 ];
 
-describe("NFTVault", () => {
+describe("PETHNFTVault", () => {
 	let owner: SignerWithAddress,
 		dao: SignerWithAddress,
 		user: SignerWithAddress;
 	let nftVault: NFTVault,
-		usdcVault: FungibleAssetVaultForDAO,
-		jpegOracle: UniswapV2MockOracle,
+		ethVault: FungibleAssetVaultForDAO,
 		ethOracle: MockV3Aggregator,
-		usd_oracle: MockV3Aggregator,
+		jpegOracle: UniswapV2MockOracle,
+		floorOracle: MockV3Aggregator,
 		fallbackOracle: MockV3Aggregator,
 		cigStaking: JPEGCardsCigStaking,
-		usdc: TestERC20,
-		stablecoin: StableCoin,
+		weth: TestERC20,
+		stablecoin: PETH,
 		erc721: TestERC721,
 		jpeg: JPEG;
 
@@ -74,11 +75,11 @@ describe("NFTVault", () => {
 		await cigStaking.deployed();
 
 		const TestERC20 = await ethers.getContractFactory("TestERC20");
-		usdc = await TestERC20.deploy("Test USDC", "USDC");
-		await usdc.deployed();
+		weth = await TestERC20.deploy("Test WETH", "WETH");
+		await weth.deployed();
 
-		const StableCoin = await ethers.getContractFactory("StableCoin");
-		stablecoin = await StableCoin.deploy();
+		const Peth = await ethers.getContractFactory("PETH");
+		stablecoin = await Peth.deploy();
 		await stablecoin.deployed();
 
 		const MockOracle = await ethers.getContractFactory("UniswapV2MockOracle");
@@ -89,14 +90,11 @@ describe("NFTVault", () => {
 		ethOracle = await MockAggregator.deploy(8, 3000e8);
 		await ethOracle.deployed();
 
-		const floorOracle = await MockAggregator.deploy(18, units(50));
+		floorOracle = await MockAggregator.deploy(18, units(50));
 		await floorOracle.deployed();
 
 		fallbackOracle = await MockAggregator.deploy(18, units(10));
 		await fallbackOracle.deployed();
-
-		usd_oracle = await MockAggregator.deploy(8, 1e8);
-		await usd_oracle.deployed();
 
 		const JPEG = await ethers.getContractFactory("JPEG");
 
@@ -118,12 +116,11 @@ describe("NFTVault", () => {
 
 		await jpegOraclesAggregator.addFloorOracle(floorOracle.address, nftValueProvider.address);
 
-		const NFTVault = await ethers.getContractFactory("NFTVault");
+		const NFTVault = await ethers.getContractFactory("PETHNFTVault");
 		nftVault = <NFTVault>await upgrades.deployProxy(NFTVault, [
 			stablecoin.address,
 			erc721.address,
 			nftValueProvider.address,
-			ethOracle.address,
 			cigStaking.address,
 			[
 				[2, 100], //debtInterestApr
@@ -144,27 +141,27 @@ describe("NFTVault", () => {
 		const FungibleAssetVaultForDAO = await ethers.getContractFactory(
 			"FungibleAssetVaultForDAO"
 		);
-		usdcVault = <FungibleAssetVaultForDAO>(
+		ethVault = <FungibleAssetVaultForDAO>(
 			await upgrades.deployProxy(FungibleAssetVaultForDAO, [
-				usdc.address,
+				weth.address,
 				stablecoin.address,
-				usd_oracle.address,
+				ethOracle.address,
 				[100, 100],
 			])
 		);
-		await usdcVault.deployed();
+		await ethVault.deployed();
 
 		await stablecoin.grantRole(default_admin_role, dao.address);
 		await stablecoin.revokeRole(default_admin_role, owner.address);
 		await stablecoin.connect(dao).grantRole(minter_role, nftVault.address);
-		await stablecoin.connect(dao).grantRole(minter_role, usdcVault.address);
+		await stablecoin.connect(dao).grantRole(minter_role, ethVault.address);
 
 		await nftVault.grantRole(dao_role, dao.address);
 		await nftVault.grantRole(liquidator_role, dao.address);
 		await nftVault.revokeRole(dao_role, owner.address);
-		await usdcVault.grantRole(default_admin_role, dao.address);
-		await usdcVault.grantRole(whitelisted_role, dao.address);
-		await usdcVault.revokeRole(default_admin_role, owner.address);
+		await ethVault.grantRole(default_admin_role, dao.address);
+		await ethVault.grantRole(whitelisted_role, dao.address);
+		await ethVault.revokeRole(default_admin_role, owner.address);
 	});
 
 	it("should be able to borrow", async () => {
@@ -183,7 +180,7 @@ describe("NFTVault", () => {
 		);
 
 		const index = 1000;
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(10);
 		await erc721.mint(user.address, index);
 		await expect(
 			nftVault.connect(user).borrow(index, borrowAmount, false)
@@ -218,7 +215,7 @@ describe("NFTVault", () => {
 		await cigStaking.unpause();
 
 		const index = 1000;
-		const borrowAmount = units(3000).mul(50).mul(39).div(100);
+		const borrowAmount = units(1).mul(50).mul(39).div(100);
 		await erc721.mint(user.address, index);
 
 		await erc721.connect(user).approve(nftVault.address, index);
@@ -255,7 +252,7 @@ describe("NFTVault", () => {
 		await cigStaking.connect(user).deposit(200);
 
 		const index = 1000;
-		const borrowAmount = units(3000).mul(50).mul(39).div(100);
+		const borrowAmount = units(1).mul(50).mul(39).div(100);
 		await erc721.mint(user.address, index);
 		await erc721.connect(user).approve(nftVault.address, index);
 		await nftVault.connect(user).borrow(index, borrowAmount, false);
@@ -266,7 +263,7 @@ describe("NFTVault", () => {
 		await cigStaking.connect(user).withdraw(200);
 
 		expect(await nftVault.isLiquidatable(index)).to.be.true;
-		expect(await nftVault.getCreditLimit(index)).to.equal(units(3000).mul(50).mul(32).div(100));
+		expect(await nftVault.getCreditLimit(index)).to.equal(units(1).mul(50).mul(32).div(100));
 	});
 
 
@@ -274,7 +271,7 @@ describe("NFTVault", () => {
 		const index = 2000;
 		await erc721.mint(user.address, index);
 
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(1).mul(10);
 
 		await erc721.connect(user).approve(nftVault.address, index);
 
@@ -308,7 +305,7 @@ describe("NFTVault", () => {
 			"Unauthorized()"
 		);
 
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(1).mul(10);
 		await nftVault.connect(user).borrow(index, borrowAmount, false);
 
 		await expect(nftVault.connect(user).repay(index, 0)).to.be.revertedWith(
@@ -331,12 +328,12 @@ describe("NFTVault", () => {
 			borrowAmount.div(2).add(await stablecoin.balanceOf(user.address))
 		);
 
-		// user prepares 30000 PUSD to repay full (consider interest)
-		const prepareAmount = units(30000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// user prepares 10 peth to repay full (consider interest)
+		const prepareAmount = units(10);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 		await stablecoin.connect(dao).transfer(user.address, prepareAmount);
 
 		// pay half again
@@ -366,7 +363,7 @@ describe("NFTVault", () => {
 
 		await erc721.connect(user).approve(nftVault.address, index);
 
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(1).mul(10);
 		await nftVault.connect(user).borrow(index, borrowAmount, false);
 
 		await expect(nftVault.connect(user).closePosition(index)).to.be.reverted;
@@ -377,12 +374,12 @@ describe("NFTVault", () => {
 			expect(err.toString()).to.contain("NonZeroDebt(" + borrowAmount.add(await nftVault.getDebtInterest(index)) + ")")
 		}
 
-		// user prepares 30000 PUSD to repay full (consider interest)
-		const prepareAmount = units(30000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// user prepares 10 peth to repay full (consider interest)
+		const prepareAmount = units(10);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 		await stablecoin.connect(dao).transfer(user.address, prepareAmount);
 
 		// full repay to close position
@@ -421,30 +418,31 @@ describe("NFTVault", () => {
 
 		expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
 
-		const borrowAmount = units(29000);
+		const borrowAmount = units(9);
 		await nftVault.connect(user).borrow(index, borrowAmount, false);
 
 		await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
 			"InvalidPosition(" + index + ")"
 		);
 
-		// dao prepares 30000 PUSD
-		const prepareAmount = units(30000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// dao prepares 10 peth
+		const prepareAmount = units(10);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 
 		expect(await nftVault.isLiquidatable(index)).to.be.false;
-		// treat to change eth price
-		await ethOracle.updateAnswer(1000e8);
+
+		await floorOracle.updateAnswer(units(10));
+
 		expect(await nftVault.isLiquidatable(index)).to.be.true;
 
 		await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
 			"ERC20: insufficient allowance"
 		);
 
-		await stablecoin.connect(dao).approve(nftVault.address, units(30000));
+		await stablecoin.connect(dao).approve(nftVault.address, units(10));
 		await nftVault.connect(dao).liquidate(index, owner.address);
 
 		expect(await stablecoin.balanceOf(dao.address)).to.be.gt(0);
@@ -454,7 +452,7 @@ describe("NFTVault", () => {
 		expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
 
 		// treat to change back eth price
-		await ethOracle.updateAnswer(3000e8);
+		await floorOracle.updateAnswer(units(50));
 
 		expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
 		expect(await nftVault.totalPositions()).to.equal(0);
@@ -465,24 +463,23 @@ describe("NFTVault", () => {
 		await erc721.mint(user.address, index);
 
 		await erc721.connect(user).approve(nftVault.address, index);
-		const borrowAmount = units(2000);
+		const borrowAmount = units(6);
 		await nftVault.connect(user).borrow(index, borrowAmount, true);
 
-		// dao prepares 30000 PUSD
-		const prepareAmount = units(30000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// dao prepares 10 peth
+		const prepareAmount = units(10);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 
-		// treat to change eth price
-		await ethOracle.updateAnswer(100e8);
+		await floorOracle.updateAnswer(units(10));
 
 		await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
 			"ERC20: insufficient allowance"
 		);
 
-		await stablecoin.connect(dao).approve(nftVault.address, units(30000));
+		await stablecoin.connect(dao).approve(nftVault.address, units(10));
 		await nftVault.connect(dao).liquidate(index, owner.address);
 
 		await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
@@ -499,8 +496,7 @@ describe("NFTVault", () => {
 			nftVault.connect(user).repay(index, borrowAmount)
 		).to.be.revertedWith("PositionLiquidated(" + index + ")");
 
-		// treat to change back eth price
-		await ethOracle.updateAnswer(3000e8);
+		await floorOracle.updateAnswer(units(50));
 
 		expect(await nftVault.openPositionsIndexes()).to.deep.equal([
 			BigNumber.from(index),
@@ -516,7 +512,7 @@ describe("NFTVault", () => {
 		await cigStaking.connect(user).deposit(200);
 
 		const index = 1000;
-		const borrowAmount = units(3000).mul(50).mul(39).div(100);
+		const borrowAmount = units(1).mul(50).mul(39).div(100);
 		await erc721.mint(user.address, index);
 		await erc721.connect(user).approve(nftVault.address, index);
 		await nftVault.connect(user).borrow(index, borrowAmount, false);
@@ -537,12 +533,12 @@ describe("NFTVault", () => {
 		);
 
 		const liquidationCost = borrowAmount.add(units(1));
-		await usdc.mint(dao.address, liquidationCost);
-		await usdc.connect(dao).approve(usdcVault.address, liquidationCost);
-		await usdcVault.connect(dao).deposit(liquidationCost);
-		await usdcVault.connect(dao).borrow(liquidationCost);
+		await weth.mint(dao.address, liquidationCost);
+		await weth.connect(dao).approve(ethVault.address, liquidationCost);
+		await ethVault.connect(dao).deposit(liquidationCost);
+		await ethVault.connect(dao).borrow(liquidationCost);
 
-		await ethOracle.updateAnswer(2900e8);
+		await floorOracle.updateAnswer(units(10));
 		expect(await nftVault.isLiquidatable(index)).to.be.true;
 
 		await stablecoin.connect(dao).approve(nftVault.address, liquidationCost);
@@ -554,8 +550,7 @@ describe("NFTVault", () => {
 
 		expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
 
-		// treat to change back eth price
-		await ethOracle.updateAnswer(3000e8);
+		await floorOracle.updateAnswer(units(50));
 
 		expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
 		expect(await nftVault.totalPositions()).to.equal(0);
@@ -566,20 +561,19 @@ describe("NFTVault", () => {
 		await erc721.mint(user.address, index);
 
 		await erc721.connect(user).approve(nftVault.address, index);
-		const borrowAmount = units(2000);
+		const borrowAmount = units(6);
 		await nftVault.connect(user).borrow(index, borrowAmount, true);
 
-		// dao prepares 30000 PUSD
-		const prepareAmount = units(30000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// dao prepares 10 peth
+		const prepareAmount = units(10);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 
-		// treat to change eth price
-		await ethOracle.updateAnswer(100e8);
+		await floorOracle.updateAnswer(units(10));
 
-		await stablecoin.connect(dao).approve(nftVault.address, units(30000));
+		await stablecoin.connect(dao).approve(nftVault.address, units(10));
 		await nftVault.connect(dao).liquidate(index, owner.address);
 
 		await expect(nftVault.connect(user).closePosition(index)).to.be.revertedWith("PositionLiquidated(" + index + ")");
@@ -593,7 +587,7 @@ describe("NFTVault", () => {
 		const index = 5000;
 		await erc721.mint(user.address, index);
 		await erc721.connect(user).approve(nftVault.address, index);
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(1).mul(10);
 		await nftVault.connect(user).borrow(index, borrowAmount, true);
 
 		const initialTimestamp = await currentTimestamp();
@@ -602,17 +596,16 @@ describe("NFTVault", () => {
 			"InvalidPosition(" + index + ")"
 		);
 
-		// dao prepares 70000 PUSD
-		const prepareAmount = units(70000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// dao prepares 25 peth
+		const prepareAmount = units(25);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 
-		// treat to change eth price
-		await ethOracle.updateAnswer(100e8);
+		await floorOracle.updateAnswer(units(10));
 
-		await stablecoin.connect(dao).approve(nftVault.address, units(70000));
+		await stablecoin.connect(dao).approve(nftVault.address, units(25));
 		await nftVault.connect(dao).liquidate(index, owner.address);
 
 		const elapsed = (await currentTimestamp()) - initialTimestamp;
@@ -642,20 +635,19 @@ describe("NFTVault", () => {
 		const index = 5000;
 		await erc721.mint(user.address, index);
 		await erc721.connect(user).approve(nftVault.address, index);
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(1).mul(10);
 		await nftVault.connect(user).borrow(index, borrowAmount, true);
 
 		const initialTimestamp = await currentTimestamp();
 
-		// dao prepares 70000 PUSD
-		const prepareAmount = units(70000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// dao prepares 25 peth
+		const prepareAmount = units(25);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 
-		// treat to change eth price
-		await ethOracle.updateAnswer(100e8);
+		await floorOracle.updateAnswer(units(10));
 
 		await stablecoin.connect(dao).approve(nftVault.address, units(70000));
 		await expect(
@@ -704,8 +696,8 @@ describe("NFTVault", () => {
 		const index1 = apes[2];
 		const index2 = 7000;
 
-		const borrowAmount1 = units(15000);
-		const borrowAmount2 = units(20000);
+		const borrowAmount1 = units(5);
+		const borrowAmount2 = units(6);
 
 		await erc721.mint(user.address, index1);
 		await erc721.mint(user.address, index2);
@@ -728,7 +720,6 @@ describe("NFTVault", () => {
 			]
 		);
 
-
 		expect((await nftVault.positions(index1)).debtPrincipal).to.equal(0);
 		expect((await nftVault.positions(index2)).debtPrincipal).to.equal(borrowAmount2);
 
@@ -742,9 +733,9 @@ describe("NFTVault", () => {
 		await erc721.connect(user).approve(nftVault.address, index);
 
 		const balanceBefore = await stablecoin.balanceOf(user.address);
-		await nftVault.connect(user).borrow(index, units(3000).mul(10), false);
+		await nftVault.connect(user).borrow(index, units(1).mul(10), false);
 		expect(await stablecoin.balanceOf(user.address)).to.equal(
-			balanceBefore.add(units(3000).mul(10).mul(995).div(1000))
+			balanceBefore.add(units(1).mul(10).mul(995).div(1000))
 		);
 	});
 
@@ -755,15 +746,15 @@ describe("NFTVault", () => {
 		await erc721.connect(user).approve(nftVault.address, index);
 
 		const balanceBefore = await stablecoin.balanceOf(user.address);
-		await nftVault.connect(user).borrow(index, units(3000).mul(10), true);
+		await nftVault.connect(user).borrow(index, units(1).mul(10), true);
 		expect(await stablecoin.balanceOf(user.address)).to.equal(
-			balanceBefore.add(units(3000).mul(10).mul(985).div(1000))
+			balanceBefore.add(units(1).mul(10).mul(985).div(1000))
 		);
 	});
 
 	it("collect mints interest and send to dao", async () => {
 		const index = 200;
-		const borrowAmount = units(3000).mul(10);
+		const borrowAmount = units(1).mul(10);
 		await erc721.mint(user.address, index);
 		await erc721.connect(user).approve(nftVault.address, index);
 		await nftVault.connect(user).borrow(index, borrowAmount, true);
@@ -780,12 +771,12 @@ describe("NFTVault", () => {
 
 		await stablecoin.connect(dao).transfer(user.address, mintedFee);
 
-		// user prepares 30000 PUSD to repay full (consider interest)
-		const prepareAmount = units(30000);
-		await usdc.mint(dao.address, prepareAmount);
-		await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-		await usdcVault.connect(dao).deposit(prepareAmount);
-		await usdcVault.connect(dao).borrow(prepareAmount);
+		// user prepares 10 peth to repay full (consider interest)
+		const prepareAmount = units(10);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);
 		await stablecoin.connect(dao).transfer(user.address, prepareAmount);
 
 		// no fee transfer when repay after collect

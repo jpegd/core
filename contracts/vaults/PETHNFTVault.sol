@@ -13,12 +13,12 @@ import "../interfaces/IJPEGCardsCigStaking.sol";
 import "../interfaces/INFTValueProvider.sol";
 
 /// @title NFT lending vault
-/// @notice This contracts allows users to borrow PUSD using NFTs as collateral.
+/// @notice This contracts allows users to borrow PETH using NFTs as collateral.
 /// The floor price of the NFT collection is fetched using a chainlink oracle, while some other more valuable traits
 /// can have an higher price set by the DAO. Users can also increase the price (and thus the borrow limit) of their
 /// NFT by submitting a governance proposal. If the proposal is approved the user can lock a percentage of the new price
 /// worth of JPEG to make it effective
-contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
+contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using SafeERC20Upgradeable for IStableCoin;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
@@ -114,8 +114,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     uint8 private constant ACTION_CLAIM_NFT = 101;
 
     IStableCoin public stablecoin;
-    /// @notice Chainlink ETH/USD price feed
-    IAggregatorV3Interface public ethAggregator;
     /// @notice The JPEG trait boost locker contract
     /// @custom:oz-renamed-from jpegOracle
     INFTValueProvider public nftValueProvider;
@@ -158,8 +156,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @custom:oz-renamed-from nftTypes
     mapping(uint256 => bytes32) private unused4; //unused after upgrade
 
-
-    /// @custom:oz-renamed-from overriddenFloorValueETH
+     /// @custom:oz-renamed-from overriddenFloorValueETH
     uint256 private unused5;
     /// @custom:oz-renamed-from minJPEGToLock
     uint256 private unused6;
@@ -178,17 +175,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @notice This function is only called once during deployment of the proxy contract. It's not called after upgrades.
-    /// @param _stablecoin PUSD address
+    /// @param _stablecoin PETH address
     /// @param _nftContract The NFT contract address. It could also be the address of an helper contract
     /// if the target NFT isn't an ERC721 (CryptoPunks as an example)
-    /// @param _ethAggregator Chainlink ETH/USD price feed address
     /// @param _cigStaking Cig staking address
     /// @param _settings Initial settings used by the contract
     function initialize(
         IStableCoin _stablecoin,
         IERC721Upgradeable _nftContract,
         INFTValueProvider _nftValueProvider,
-        IAggregatorV3Interface _ethAggregator,
         IJPEGCardsCigStaking _cigStaking,
         VaultSettings calldata _settings
     ) external initializer {
@@ -238,7 +233,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         ) revert InvalidRate(_settings.cigStakedLiquidationLimitRate);
 
         stablecoin = _stablecoin;
-        ethAggregator = _ethAggregator;
         cigStaking = _cigStaking;
         nftContract = _nftContract;
         nftValueProvider = _nftValueProvider;
@@ -255,7 +249,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         nftValueProvider = _provider;
     }
-
 
     /// @notice Returns the number of open positions
     /// @return The number of open positions
@@ -275,21 +268,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return nftValueProvider.getNFTValueETH(_nftIndex);
     }
 
-    /// @param _nftIndex The NFT to return the value of
-    /// @return The value in USD of the NFT at index `_nftIndex`, with 18 decimals.
-    function getNFTValueUSD(uint256 _nftIndex) public view returns (uint256) {
-        uint256 nftValue = getNFTValueETH(_nftIndex);
-        return (nftValue * _ethPriceUSD()) / 1 ether;
-    }
-
     /// @param _nftIndex The NFT to return the credit limit of
-    /// @return The PUSD credit limit of the NFT at index `_nftIndex`.
+    /// @return The PETH credit limit of the NFT at index `_nftIndex`.
     function getCreditLimit(uint256 _nftIndex) external view returns (uint256) {
         return _getCreditLimit(positionOwner[_nftIndex], _nftIndex);
     }
 
     /// @param _nftIndex The NFT to return the liquidation limit of
-    /// @return The PUSD liquidation limit of the NFT at index `_nftIndex`.
+    /// @return The PETH liquidation limit of the NFT at index `_nftIndex`.
     function getLiquidationLimit(uint256 _nftIndex)
         public
         view
@@ -312,7 +298,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @param _nftIndex The NFT to check
-    /// @return The PUSD debt interest accumulated by the NFT at index `_nftIndex`.
+    /// @return The PETH debt interest accumulated by the NFT at index `_nftIndex`.
     function getDebtInterest(uint256 _nftIndex) public view returns (uint256) {
         Position storage position = positions[_nftIndex];
         uint256 principal = position.debtPrincipal;
@@ -399,7 +385,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows users to open positions and borrow using an NFT
     /// @dev emits a {Borrowed} event
     /// @param _nftIndex The index of the NFT to be used as collateral
-    /// @param _amount The amount of PUSD to be borrowed. Note that the user will receive less than the amount requested,
+    /// @param _amount The amount of PETH to be borrowed. Note that the user will receive less than the amount requested,
     /// the borrow fee and insurance automatically get removed from the amount borrowed
     /// @param _useInsurance Whereter to open an insured position. In case the position has already been opened previously,
     /// this parameter needs to match the previous insurance mode. To change insurance mode, a user needs to close and reopen the position
@@ -741,7 +727,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        uint256 value = getNFTValueUSD(_nftIndex);
+        uint256 value = getNFTValueETH(_nftIndex);
         if (cigStaking.isUserStaking(user)) {
             return
                 (value * settings.cigStakedCreditLimitRate.numerator) /
@@ -760,7 +746,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         view
         returns (uint256)
     {
-        uint256 value = getNFTValueUSD(_nftIndex);
+        uint256 value = getNFTValueETH(_nftIndex);
         if (cigStaking.isUserStaking(user)) {
             return
                 (value * settings.cigStakedLiquidationLimitRate.numerator) /
@@ -822,35 +808,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             (elapsedTime * totalDebt * settings.debtInterestApr.numerator) /
             settings.debtInterestApr.denominator /
             365 days;
-    }
-
-    /// @dev Returns the current ETH price in USD
-    /// @return The current ETH price, 18 decimals
-    function _ethPriceUSD() internal view returns (uint256) {
-        return _normalizeAggregatorAnswer(ethAggregator);
-    }
-
-    /// @dev Fetches and converts to 18 decimals precision the latest answer of a Chainlink aggregator
-    /// @param aggregator The aggregator to fetch the answer from
-    /// @return The latest aggregator answer, normalized
-    function _normalizeAggregatorAnswer(IAggregatorV3Interface aggregator)
-        internal
-        view
-        returns (uint256)
-    {
-        (, int256 answer, , uint256 timestamp, ) = aggregator.latestRoundData();
-
-        if (answer == 0 || timestamp == 0) revert InvalidOracleResults();
-
-        uint8 decimals = aggregator.decimals();
-
-        unchecked {
-            //converts the answer to have 18 decimals
-            return
-                decimals > 18
-                    ? uint256(answer) / 10**(decimals - 18)
-                    : uint256(answer) * 10**(18 - decimals);
-        }
     }
 
     /// @dev Checks if `r1` is greater than `r2`.
