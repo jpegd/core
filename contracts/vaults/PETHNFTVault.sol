@@ -464,6 +464,15 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totalFeeCollected = 0;
     }
 
+    /// @notice Allows the DAO to withdraw _amount of an ERC20
+    function rescueToken(IERC20Upgradeable _token, uint256 _amount)
+        external
+        nonReentrant
+        onlyRole(DAO_ROLE)
+    {
+        _token.safeTransfer(msg.sender, _amount);
+    }
+
     /// @notice Allows the setter contract to change fields in the `VaultSettings` struct.
     /// @dev Validation and single field setting is handled by an external contract with the
     /// `SETTER_ROLE`. This was done to reduce the contract's size.

@@ -158,7 +158,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @custom:oz-renamed-from nftTypes
     mapping(uint256 => bytes32) private unused4; //unused after upgrade
 
-
     /// @custom:oz-renamed-from overriddenFloorValueETH
     uint256 private unused5;
     /// @custom:oz-renamed-from minJPEGToLock
@@ -242,20 +241,21 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         cigStaking = _cigStaking;
         nftContract = _nftContract;
         nftValueProvider = _nftValueProvider;
-        
+
         settings = _settings;
     }
 
     /// @dev Function called by the {ProxyAdmin} contract during the upgrade process.
     /// Only called on existing vaults where the `initialize` function has already been called.
     /// It won't be called in new deployments.
-    function finalizeUpgrade(INFTValueProvider _provider) external onlyRole(SETTER_ROLE) {
-        if (address(_provider) == address(0))
-            revert ZeroAddress();
+    function finalizeUpgrade(INFTValueProvider _provider)
+        external
+        onlyRole(SETTER_ROLE)
+    {
+        if (address(_provider) == address(0)) revert ZeroAddress();
 
         nftValueProvider = _provider;
     }
-
 
     /// @notice Returns the number of open positions
     /// @return The number of open positions
@@ -476,6 +476,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         accrue();
         stablecoin.mint(msg.sender, totalFeeCollected);
         totalFeeCollected = 0;
+    }
+
+    /// @notice Allows the DAO to withdraw _amount of an ERC20
+    function rescueToken(IERC20Upgradeable _token, uint256 _amount)
+        external
+        nonReentrant
+        onlyRole(DAO_ROLE)
+    {
+        _token.safeTransfer(msg.sender, _amount);
     }
 
     /// @notice Allows the setter contract to change fields in the `VaultSettings` struct.
