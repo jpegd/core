@@ -145,63 +145,83 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// is deposited again, even in case of a different owner. The locked JPEG will only be claimable by the original lock creator
     /// once the lock expires. If the lock is renewed by the new owner, the JPEG from the previous lock will be sent back to the original
     /// lock creator.
-    /// @dev emits a {JPEGLocked} event
-    /// @param _nftIndex The index of the NFT to boost (has to be a non floor NFT)
-    /// @param _unlockAt The lock expiration time.
-    function applyTraitBoost(uint256 _nftIndex, uint256 _unlockAt)
-        external
-        nonReentrant
-    {
-        bytes32 nftType = nftTypes[_nftIndex];
-        if (nftType == bytes32(0)) revert InvalidNFTType(nftType);
+    /// @dev emits multiple {JPEGLocked} events
+    /// @param _nftIndexes The indexes of the non floor NFTs to boost
+    /// @param _unlocks The locks expiration times
+    function applyTraitBoost(
+        uint256[] calldata _nftIndexes,
+        uint256[] calldata _unlocks
+    ) external nonReentrant {
+        if (_nftIndexes.length != _unlocks.length) revert InvalidLength();
 
-        JPEGLock storage jpegLock = lockPositions[_nftIndex];
-        if (block.timestamp >= _unlockAt || jpegLock.unlockAt >= _unlockAt)
-            revert InvalidUnlockTime(_unlockAt);
+        uint256 requiredJpeg;
+        uint256 jpegToRefund;
+        for (uint256 i; i < _nftIndexes.length; ++i) {
+            uint256 index = _nftIndexes[i];
 
-        uint256 jpegToLock = calculateJPEGToLock(nftType, _jpegPriceETH());
+            bytes32 nftType = nftTypes[index];
+            if (nftType == bytes32(0)) revert InvalidNFTType(nftType);
 
-        if (minJPEGToLock >= jpegToLock) revert InvalidNFTType(nftType);
+            uint256 unlockAt = _unlocks[i];
 
-        uint256 previousLockValue = jpegLock.lockedValue;
-        address previousOwner = jpegLock.owner;
+            JPEGLock storage jpegLock = lockPositions[index];
+            if (block.timestamp >= unlockAt || jpegLock.unlockAt >= unlockAt)
+                revert InvalidUnlockTime(unlockAt);
 
-        jpegLock.lockedValue = jpegToLock;
-        jpegLock.unlockAt = _unlockAt;
-        jpegLock.owner = msg.sender;
+            uint256 jpegToLock = calculateJPEGToLock(nftType, _jpegPriceETH());
 
-        if (previousOwner == msg.sender) {
-            if (jpegToLock > previousLockValue)
-                jpeg.safeTransferFrom(
-                    msg.sender,
-                    address(this),
-                    jpegToLock - previousLockValue
-                );
-            else if (previousLockValue > jpegToLock)
-                jpeg.safeTransfer(msg.sender, previousLockValue - jpegToLock);
-        } else {
-            if (previousLockValue > 0)
+            if (minJPEGToLock >= jpegToLock) revert InvalidNFTType(nftType);
+
+            uint256 previousLockValue = jpegLock.lockedValue;
+            address previousOwner = jpegLock.owner;
+
+            jpegLock.lockedValue = jpegToLock;
+            jpegLock.unlockAt = unlockAt;
+            jpegLock.owner = msg.sender;
+
+            requiredJpeg += jpegToLock;
+
+            if (previousOwner == msg.sender) jpegToRefund += previousLockValue;
+            else if (previousLockValue > 0)
                 jpeg.safeTransfer(previousOwner, previousLockValue);
-            jpeg.safeTransferFrom(msg.sender, address(this), jpegToLock);
+
+            emit JPEGLocked(msg.sender, index, jpegToLock, unlockAt);
         }
 
-        emit JPEGLocked(msg.sender, _nftIndex, jpegToLock, _unlockAt);
+        if (requiredJpeg > jpegToRefund)
+            jpeg.safeTransferFrom(
+                msg.sender,
+                address(this),
+                requiredJpeg - jpegToRefund
+            );
+        else if (requiredJpeg < jpegToRefund)
+            jpeg.safeTransfer(msg.sender, jpegToRefund - requiredJpeg);
     }
 
     /// @notice Allows lock creators to unlock the JPEG associated to the NFT at index `_nftIndex`, provided the lock expired.
     /// @dev emits a {JPEGUnlocked} event
-    /// @param _nftIndex The index of the NFT holding the lock.
-    function unlockJPEG(uint256 _nftIndex) external nonReentrant {
-        JPEGLock memory jpegLock = lockPositions[_nftIndex];
-        if (jpegLock.owner != msg.sender) revert Unauthorized();
+    /// @param _nftIndexes The indexes of the NFTs holding the locks.
+    function unlockJPEG(uint256[] calldata _nftIndexes) external nonReentrant {
+        uint256 length = _nftIndexes.length;
+        if (length == 0)
+            revert InvalidLength();
 
-        if (block.timestamp < jpegLock.unlockAt) revert Unauthorized();
+        uint256 jpegToSend;
+        for (uint256 i; i < length; ++i) {
+            uint256 index = _nftIndexes[i];
+            JPEGLock memory jpegLock = lockPositions[index];
+            if (jpegLock.owner != msg.sender) revert Unauthorized();
 
-        delete lockPositions[_nftIndex];
+            if (block.timestamp < jpegLock.unlockAt) revert Unauthorized();
 
-        jpeg.safeTransfer(msg.sender, jpegLock.lockedValue);
+            jpegToSend += jpegLock.lockedValue;
 
-        emit JPEGUnlocked(msg.sender, _nftIndex, jpegLock.lockedValue);
+            delete lockPositions[index];
+
+            emit JPEGUnlocked(msg.sender, index, jpegLock.lockedValue);
+        }
+
+        jpeg.safeTransfer(msg.sender, jpegToSend);
     }
 
     function addLocks(
