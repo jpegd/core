@@ -26,5 +26,8 @@
     "nftValueProvider-punks": "0x51CAA94e52b48849e2314d8959eB416E646aa65D",
     "nftValueProvider-rocks": "0xb145723aEDE3e847Cb2C7B78BF55eD3bF963673e",
     "nftValueProvider-bayc": "0xd419bf430A446185497331A8364Ef054166caa84",
-    "nftValueProvider-mayc": "0x460cA887a7a85fB06c3AcCC660FcA7A39B537Cbb"
+    "nftValueProvider-mayc": "0x460cA887a7a85fB06c3AcCC660FcA7A39B537Cbb",
+    "nftSetter": "0xd84847a8650e530b8ECC6121D3adE5880fCA259F",
+    "pethRocksHelper": "0x66a9fe5BB106c51dE533A7A91119eB521A2f18cB",
+    "pethNftVault-f18cB": "0xAF887649F859921614Fd018cFB32E27DA6547093"
 }
