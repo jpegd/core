@@ -11,6 +11,7 @@ import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
 import "../interfaces/IJPEGCardsCigStaking.sol";
 import "../interfaces/INFTValueProvider.sol";
+import "../interfaces/INFTStrategy.sol";
 
 /// @title NFT lending vault
 /// @notice This contracts allows users to borrow PETH using NFTs as collateral.
@@ -22,6 +23,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using SafeERC20Upgradeable for IStableCoin;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
+    using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;
 
     error InvalidNFT(uint256 nftIndex);
     error InvalidRate(Rate rate);
@@ -40,6 +42,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error ZeroAddress();
     error InvalidOracleResults();
     error UnknownAction(uint8 action);
+    error InvalidLength();
+    error InvalidStrategy();
 
     event PositionOpened(address indexed owner, uint256 indexed index);
     event Borrowed(
@@ -57,6 +61,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     );
     event Repurchased(address indexed owner, uint256 indexed index);
     event InsuranceExpired(address indexed owner, uint256 indexed index);
+    event StrategyDeposit(uint256 indexed nftIndex, address indexed strategy, bool isStandard);
+    event StrategyWithdrawal(uint256 indexed nftIndex, address indexed strategy);
 
     enum BorrowType {
         NOT_CONFIRMED,
@@ -71,6 +77,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 debtAmountForRepurchase;
         uint256 liquidatedAt;
         address liquidator;
+        INFTStrategy strategy;
     }
 
     struct Rate {
@@ -164,6 +171,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     mapping(bytes32 => Rate) private unused7;
     /// @custom:oz-renamed-from lockPositions
     mapping(uint256 => Unused13) private unused13;
+
+    EnumerableSetUpgradeable.AddressSet private nftStrategies;
 
     /// @dev Checks if the provided NFT index is valid
     /// @param nftIndex The index to check
@@ -321,6 +330,11 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
+    /// @return The whitelisted strategies for this vault.
+    function getStrategies() external view returns (address[] memory) {
+        return nftStrategies.values();
+    }
+
     /// @dev The {accrue} function updates the contract's state by calculating
     /// the additional interest accrued since the last state update
     function accrue() public {
@@ -457,6 +471,29 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _claimExpiredInsuranceNFT(_nftIndex, _recipient);
     }
 
+    /// @notice Allows borrowers to deposit NFTs to a whitelisted strategy. Strategies may be used to claim airdrops, stake NFTs for rewards and more.
+    /// @dev Emits multiple {StrategyDeposit} events
+    /// @param _nftIndexes The indexes of the NFTs to deposit
+    /// @param _strategyIndex The index of the strategy to deposit the NFTs into, see {getStrategies}
+    /// @param _additionalData Additional data to send to the strategy.
+    function depositInStrategy(
+        uint256[] calldata _nftIndexes,
+        uint256 _strategyIndex,
+        bytes calldata _additionalData
+    ) external nonReentrant {
+        _depositInStrategy(_nftIndexes, _strategyIndex, _additionalData);
+    }
+
+    /// @notice Allows users to withdraw NFTs from strategies
+    /// @dev Emits multiple {StrategyWithdrawal} events
+    /// @param _nftIndexes The indexes of the NFTs to withdraw
+    function withdrawFromStrategy(uint256[] calldata _nftIndexes)
+        external
+        nonReentrant
+    {
+        _withdrawFromStrategy(_nftIndexes);
+    }
+
     /// @notice Allows the DAO to collect interest and fees before they are repaid
     function collect() external nonReentrant onlyRole(DAO_ROLE) {
         accrue();
@@ -472,6 +509,21 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     {
         _token.safeTransfer(msg.sender, _amount);
     }
+
+    /// @notice Allows the DAO to whitelist a strategy
+    function addStrategy(address _strategy) external onlyRole(DAO_ROLE) {
+        if (_strategy == address(0)) revert ZeroAddress();
+
+        if (!nftStrategies.add(_strategy)) revert InvalidStrategy();
+    }
+
+    /// @notice Allows the DAO to remove a strategy from the whitelist
+    function removeStrategy(address _strategy) external onlyRole(DAO_ROLE) {
+        if (_strategy == address(0)) revert ZeroAddress();
+
+        if (!nftStrategies.remove(_strategy)) revert InvalidStrategy();
+    }
+
 
     /// @notice Allows the setter contract to change fields in the `VaultSettings` struct.
     /// @dev Validation and single field setting is handled by an external contract with the
@@ -612,19 +664,21 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         validNFTIndex(_nftIndex)
     {
         if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
-        if (positions[_nftIndex].liquidatedAt > 0)
-            revert PositionLiquidated(_nftIndex);
+
+        Position storage position = positions[_nftIndex];
+        if (position.liquidatedAt > 0) revert PositionLiquidated(_nftIndex);
+
         uint256 debt = _getDebtAmount(_nftIndex);
         if (debt > 0) revert NonZeroDebt(debt);
 
+        INFTStrategy strategy = position.strategy;
         positionOwner[_nftIndex] = address(0);
         delete positions[_nftIndex];
         positionIndexes.remove(_nftIndex);
 
-        // transfer nft back to owner if nft was deposited
-        if (nftContract.ownerOf(_nftIndex) == address(this)) {
+        if (address(strategy) == address(0))
             nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
-        }
+        else strategy.withdraw(msg.sender, msg.sender, _nftIndex);
 
         emit PositionClosed(msg.sender, _nftIndex);
     }
@@ -653,17 +707,25 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totalDebtAmount -= debtAmount;
         position.debtPortion = 0;
 
+        INFTStrategy strategy = position.strategy;
         bool insured = position.borrowType == BorrowType.USE_INSURANCE;
         if (insured) {
             position.debtAmountForRepurchase = debtAmount;
             position.liquidatedAt = block.timestamp;
             position.liquidator = msg.sender;
+
+            if (address(strategy) != address(0)) {
+                strategy.withdraw(posOwner, address(this), _nftIndex);
+                delete position.strategy;
+            }
         } else {
             // transfer nft to liquidator
             positionOwner[_nftIndex] = address(0);
             delete positions[_nftIndex];
             positionIndexes.remove(_nftIndex);
-            nftContract.transferFrom(address(this), _recipient, _nftIndex);
+            if (address(strategy) == address(0))
+                nftContract.transferFrom(address(this), _recipient, _nftIndex);
+            else strategy.withdraw(posOwner, _recipient, _nftIndex);
         }
 
         emit Liquidated(msg.sender, posOwner, _nftIndex, insured);
@@ -726,6 +788,76 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         nftContract.transferFrom(address(this), _recipient, _nftIndex);
 
         emit InsuranceExpired(owner, _nftIndex);
+    }
+
+    /// @dev See {depositInStrategy}
+    function _depositInStrategy(
+        uint256[] calldata _nftIndexes,
+        uint256 _strategyIndex,
+        bytes calldata _additionalData
+    ) internal {
+        uint256 length = _nftIndexes.length;
+        if (length == 0) revert InvalidLength();
+        if (_strategyIndex >= nftStrategies.length()) revert InvalidStrategy();
+
+        INFTStrategy strategy = INFTStrategy(nftStrategies.at(_strategyIndex));
+
+        IERC721Upgradeable nft = nftContract;
+        bool isStandard = INFTStrategy(strategy).kind() ==
+            INFTStrategy.Kind.STANDARD;
+        address depositAddress = strategy.depositAddress(msg.sender);
+        for (uint256 i; i < length; ++i) {
+            uint256 index = _nftIndexes[i];
+
+            if (positionOwner[index] != msg.sender) revert Unauthorized();
+
+            Position storage position = positions[index];
+            if (position.liquidatedAt > 0) revert PositionLiquidated(index);
+
+            if (address(position.strategy) != address(0)) revert InvalidPosition(index);
+
+            if (isStandard) position.strategy = strategy;
+            nft.transferFrom(address(this), depositAddress, index);
+
+            emit StrategyDeposit(index, address(strategy), isStandard);
+        }
+
+        strategy.afterDeposit(msg.sender, _nftIndexes, _additionalData);
+
+        if (!isStandard) {
+            for (uint256 i; i < length; ++i) {
+                if (nft.ownerOf(_nftIndexes[i]) != address(this))
+                    revert InvalidStrategy();
+            }
+        }
+
+
+    }
+
+    /// @dev See {withdrawFromStrategy}
+    function _withdrawFromStrategy(uint256[] calldata _nftIndexes) internal {
+        uint256 length = _nftIndexes.length;
+        if (length == 0) revert InvalidLength();
+
+        IERC721Upgradeable nft = nftContract;
+        for (uint256 i; i < length; ++i) {
+            uint256 index = _nftIndexes[i];
+
+            if (positionOwner[index] != msg.sender) revert Unauthorized();
+
+            Position storage position = positions[index];
+            INFTStrategy strategy = position.strategy;
+            if (address(strategy) != address(0)) {
+                strategy.withdraw(msg.sender, address(this), index);
+
+                if (nft.ownerOf(index) != address(this))
+                    revert InvalidStrategy();
+
+                delete position.strategy;
+
+                emit StrategyWithdrawal(index, address(strategy));
+            }
+        }
     }
 
     /// @dev Returns the credit limit of an NFT
