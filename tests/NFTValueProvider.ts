@@ -83,75 +83,81 @@ describe("NFTValueProvider", () => {
 	});
 
 	it("should allow users to lock JPEG to unlock trait boosts", async () => {
-		await expect(nftValueProvider.applyTraitBoost(0, 0)).to.be.revertedWith("InvalidNFTType(\"" + zeroHash + "\")");
+		await expect(nftValueProvider.applyTraitBoost([0], [0])).to.be.revertedWith("InvalidNFTType(\"" + zeroHash + "\")");
 
-		const index = 100;
+		const indexes = [100, 101, 102];
 
 		await nftValueProvider.setNFTTypeMultiplier(apeHash, { numerator: 10, denominator: 1});
-		await nftValueProvider.setNFTType([index], apeHash);
+		await nftValueProvider.setNFTType(indexes, apeHash);
 
-		await expect(nftValueProvider.applyTraitBoost(index, 0)).to.be.revertedWith("InvalidUnlockTime(0)");
+		await expect(nftValueProvider.applyTraitBoost(indexes, [0, 0])).to.be.revertedWith("InvalidLength");
+		await expect(nftValueProvider.applyTraitBoost(indexes, [0, 0, 0])).to.be.revertedWith("InvalidUnlockTime(0)");
 
 		const timestamp = (await ethers.provider.getBlock("latest")).timestamp;
 
-		await jpeg.mint(user.address, units(36000));
-		await jpeg.connect(user).approve(nftValueProvider.address, units(36000));
+		await jpeg.mint(user.address, units(36000 * 3));
+		await jpeg.connect(user).approve(nftValueProvider.address, units(36000 * 3));
 
-		await nftValueProvider.connect(user).applyTraitBoost(index, timestamp + 1000);
+		await nftValueProvider.connect(user).applyTraitBoost(indexes, [0, 0, 0].map(() => timestamp + 1000));
 
-		expect(await nftValueProvider.getNFTValueETH(index)).to.equal(units(500));
+		expect(await nftValueProvider.getNFTValueETH(indexes[0])).to.equal(units(500));
 
 		expect(await jpeg.balanceOf(user.address)).to.equal(0);
-		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(36000));
+		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(36000 * 3));
 
-		await expect(nftValueProvider.unlockJPEG(index)).to.be.revertedWith("Unauthorized()");
-		await expect(nftValueProvider.connect(user).unlockJPEG(index)).to.be.revertedWith("Unauthorized()");
+		await expect(nftValueProvider.unlockJPEG(indexes)).to.be.revertedWith("Unauthorized()");
+		await expect(nftValueProvider.connect(user).unlockJPEG(indexes)).to.be.revertedWith("Unauthorized()");
 
 		await timeTravel(1000);
 
-		expect(await nftValueProvider.getNFTValueETH(index)).to.equal(units(50));
+		expect(await nftValueProvider.getNFTValueETH(indexes[0])).to.equal(units(50));
+		expect(await nftValueProvider.getNFTValueETH(indexes[1])).to.equal(units(50));
+		expect(await nftValueProvider.getNFTValueETH(indexes[2])).to.equal(units(50));
 
-		await nftValueProvider.connect(user).unlockJPEG(index);
+		await nftValueProvider.connect(user).unlockJPEG(indexes.slice(1));
+
+		expect(await jpeg.balanceOf(user.address)).to.equal(units(36000 * 2));
+		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(36000));
 	});
 
 
 	it("should allow users to override JPEG locks", async () => {
-		const index = 100;
+		const indexes = [100, 101, 102];
 
 		await nftValueProvider.setNFTTypeMultiplier(apeHash, { numerator: 10, denominator: 1});
-		await nftValueProvider.setNFTType([index], apeHash);
+		await nftValueProvider.setNFTType(indexes, apeHash);
 
 		await jpeg.mint(user.address, units(72000));
 		await jpeg.connect(user).approve(nftValueProvider.address, units(720000));
 
 		const timestamp = (await ethers.provider.getBlock("latest")).timestamp;
-		await nftValueProvider.connect(user).applyTraitBoost(index, timestamp + 1000);
+		await nftValueProvider.connect(user).applyTraitBoost([indexes[0]], [timestamp + 1000]);
 
 		expect(await jpeg.balanceOf(user.address)).to.equal(units(36000));
 		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(36000));
 
 		await jpegOracle.setPrice(2000000000000000);
 
-		await expect(nftValueProvider.connect(user).applyTraitBoost(index, timestamp + 1000)).to.be.revertedWith("InvalidUnlockTime(" + (timestamp + 1000) + ")");
+		await expect(nftValueProvider.connect(user).applyTraitBoost([indexes[0]], [timestamp + 1000])).to.be.revertedWith("InvalidUnlockTime(" + (timestamp + 1000) + ")");
 
-		await nftValueProvider.connect(user).applyTraitBoost(index, timestamp + 1001);
+		await nftValueProvider.connect(user).applyTraitBoost(indexes, [0, 0, 0].map(() => timestamp + 1001));
 
-		expect(await jpeg.balanceOf(user.address)).to.equal(units(54000));
-		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(18000));
+		expect(await jpeg.balanceOf(user.address)).to.equal(units(18000));
+		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(54000));
 
-		await jpegOracle.setPrice(500000000000000);
+		await jpegOracle.setPrice(1000000000000000);
 
-		await nftValueProvider.connect(user).applyTraitBoost(index, timestamp + 1002);
+		await nftValueProvider.connect(user).applyTraitBoost([indexes[0]], [timestamp + 1002]);
 
 		expect(await jpeg.balanceOf(user.address)).to.equal(0);
 		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(72000));
 
-		await jpeg.mint(owner.address, units(72000));
-		await jpeg.approve(nftValueProvider.address, units(720000));
+		await jpeg.mint(owner.address, units(36000));
+		await jpeg.approve(nftValueProvider.address, units(36000));
 
-		await nftValueProvider.applyTraitBoost(index, timestamp + 1003);
+		await nftValueProvider.applyTraitBoost([indexes[0]], [timestamp + 1003]);
 
-		expect(await jpeg.balanceOf(user.address)).to.equal(units(72000));
+		expect(await jpeg.balanceOf(user.address)).to.equal(units(36000));
 		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(72000));
 		expect(await jpeg.balanceOf(owner.address)).to.equal(units(1000000000));
 	});
