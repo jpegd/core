@@ -27,6 +27,7 @@ describe("ApeStakingStrategy", () => {
     let strategy: BAYCApeStakingStrategy;
     let apeStaking: MockApeStaking;
     let bayc: TestERC721;
+    let bakc: TestERC721;
     let ape: TestERC20;
 
     beforeEach(async () => {
@@ -40,8 +41,10 @@ describe("ApeStakingStrategy", () => {
         const TestERC721 = await ethers.getContractFactory("TestERC721");
         bayc = await TestERC721.deploy();
 
+        bakc = await TestERC721.deploy();
+
         const MockApeStaking = await ethers.getContractFactory("MockApeStaking");
-        apeStaking = await MockApeStaking.deploy(ape.address, bayc.address, bayc.address);
+        apeStaking = await MockApeStaking.deploy(ape.address, bayc.address, bayc.address, bakc.address);
 
         const SimpleUserProxy = await ethers.getContractFactory("SimpleUserProxy");
         const proxy = await SimpleUserProxy.deploy();
@@ -52,7 +55,9 @@ describe("ApeStakingStrategy", () => {
                 apeStaking.address,
                 ape.address,
                 bayc.address,
+                bakc.address,
                 1,
+                3,
                 proxy.address
             ]
         );
@@ -154,10 +159,10 @@ describe("ApeStakingStrategy", () => {
         await ape.mint(user.address, secondAmount);
         await ape.connect(user).approve(strategy.address, secondAmount);
 
-        await expect(strategy.stakeTokens(newAmounts)).to.be.revertedWith("Unauthorized()");
-        await expect(strategy.stakeTokens([...newAmounts, { tokenId: 100, amount: units(500) }])).to.be.reverted;
+        await expect(strategy.stakeTokensMain(newAmounts)).to.be.revertedWith("Unauthorized()");
+        await expect(strategy.stakeTokensMain([...newAmounts, { tokenId: 100, amount: units(500) }])).to.be.reverted;
 
-        await strategy.connect(user).stakeTokens(newAmounts);
+        await strategy.connect(user).stakeTokensMain(newAmounts);
         
         expect(await ape.balanceOf(apeStaking.address)).to.equal(firstAmount.add(secondAmount));
     });
@@ -188,16 +193,16 @@ describe("ApeStakingStrategy", () => {
             new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
         );
 
-        await expect(strategy.connect(user).withdrawStakedTokens([{tokenId: 10, amount: units(200)}], user.address)).to.be.reverted;
+        await expect(strategy.connect(user).withdrawTokensMain([{tokenId: 10, amount: units(200)}], user.address)).to.be.reverted;
         
         const toWithdraw = [
             {tokenId: 0, amount: units(100)},
             {tokenId: 1, amount: units(100)}
         ];
 
-        await expect(strategy.withdrawStakedTokens(toWithdraw, user.address)).to.be.revertedWith("Unauthorized()");
+        await expect(strategy.withdrawTokensMain(toWithdraw, user.address)).to.be.revertedWith("Unauthorized()");
 
-        await strategy.connect(user).withdrawStakedTokens(toWithdraw, user.address);
+        await strategy.connect(user).withdrawTokensMain(toWithdraw, user.address);
 
         const totalWithdrawn = toWithdraw.reduce((s, e) => {
             return e.amount.add(s);
@@ -235,23 +240,189 @@ describe("ApeStakingStrategy", () => {
             new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
         );
         
-        await expect(strategy.connect(user).claim([100], user.address)).to.be.reverted;
+        await expect(strategy.connect(user).claimMain([100], user.address)).to.be.reverted;
         
         const toClaim = [0, 1];
 
-        await expect(strategy.claim(toClaim, user.address)).to.be.revertedWith("Unauthorized()");
+        await expect(strategy.claimMain(toClaim, user.address)).to.be.revertedWith("Unauthorized()");
 
-        await strategy.connect(user).claim(toClaim, user.address);
+        await strategy.connect(user).claimMain(toClaim, user.address);
 
         expect(await ape.balanceOf(user.address)).to.equal(units(1 * toClaim.length));
     });
 
+    it("should allow users to pair BAKCs with their deposited NFTs", async () => {
+        const nftAmounts = [
+            {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
+            {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
+            {mainTokenId: 2, bakcTokenId: 2, amount: units(300)},
+            {mainTokenId: 3, bakcTokenId: 3, amount: units(400)}
+        ];
+
+        const totalAmount = nftAmounts.reduce((s, e) => {
+            return e.amount.add(s);
+        }, BigNumber.from(0));
+
+        const depositAddress = await strategy.depositAddress(user.address);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bayc.mint(depositAddress, nftAmounts[i].mainTokenId);
+        }
+
+        await ape.mint(user.address, totalAmount.mul(3));
+        await ape.connect(user).approve(strategy.address, totalAmount.mul(3));
+
+        await strategy.afterDeposit(
+            user.address, 
+            nftAmounts.map(e => e.mainTokenId), 
+            new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
+        );
+        
+        await bakc.connect(user).setApprovalForAll(strategy.address, true);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bakc.mint(user.address, nftAmounts[i].bakcTokenId);
+        }
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
+        
+        for (let i = 0; i < nftAmounts.length; i++) {
+            expect(await bakc.ownerOf(nftAmounts[i].bakcTokenId)).to.equal(depositAddress);
+        }
+
+        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.mul(2));
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
+
+        for (let i = 0; i < nftAmounts.length; i++) {
+            expect(await bakc.ownerOf(nftAmounts[i].bakcTokenId)).to.equal(depositAddress);
+        }
+
+        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.mul(3));
+    });
+
+    it("should allow users to withdraw tokens from a BAKC pair", async () => {
+        const nftAmounts = [
+            {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
+            {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
+            {mainTokenId: 2, bakcTokenId: 2, amount: units(300)},
+            {mainTokenId: 3, bakcTokenId: 3, amount: units(400)}
+        ];
+
+        const totalAmount = nftAmounts.reduce((s, e) => {
+            return e.amount.add(s);
+        }, BigNumber.from(0));
+
+        const depositAddress = await strategy.depositAddress(user.address);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bayc.mint(depositAddress, nftAmounts[i].mainTokenId);
+        }
+
+        await ape.mint(user.address, totalAmount.mul(2));
+        await ape.connect(user).approve(strategy.address, totalAmount.mul(2));
+
+        await strategy.afterDeposit(
+            user.address, 
+            nftAmounts.map(e => e.mainTokenId), 
+            new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
+        );
+        
+        await bakc.connect(user).setApprovalForAll(strategy.address, true);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bakc.mint(user.address, nftAmounts[i].bakcTokenId);
+        }
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
+        
+        await strategy.connect(user).withdrawTokensBAKC([nftAmounts[0]], user.address);
+
+        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.mul(2).sub(nftAmounts[0].amount));
+        expect(await ape.balanceOf(user.address)).to.equal(nftAmounts[0].amount);
+    });
+
+    it("should allow users to withdraw BAKC if unpaired", async () => {
+        const nftAmounts = [
+            {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
+            {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
+            {mainTokenId: 2, bakcTokenId: 2, amount: units(300)},
+            {mainTokenId: 3, bakcTokenId: 3, amount: units(400)}
+        ];
+
+        const totalAmount = nftAmounts.reduce((s, e) => {
+            return e.amount.add(s);
+        }, BigNumber.from(0));
+
+        const depositAddress = await strategy.depositAddress(user.address);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bayc.mint(depositAddress, nftAmounts[i].mainTokenId);
+        }
+
+        await ape.mint(user.address, totalAmount.mul(2));
+        await ape.connect(user).approve(strategy.address, totalAmount.mul(2));
+
+        await strategy.afterDeposit(
+            user.address, 
+            nftAmounts.map(e => e.mainTokenId), 
+            new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
+        );
+        
+        await bakc.connect(user).setApprovalForAll(strategy.address, true);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bakc.mint(user.address, nftAmounts[i].bakcTokenId);
+        }
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
+
+        await expect(strategy.connect(user).withdrawBAKC([nftAmounts[0].bakcTokenId], user.address)).to.be.revertedWith("BAKCPaired(" + nftAmounts[0].bakcTokenId + ")");
+
+        await strategy.connect(user).withdrawTokensBAKC([nftAmounts[0]], user.address);
+        await strategy.connect(user).withdrawBAKC([nftAmounts[0].bakcTokenId], user.address);
+
+        expect(await bakc.ownerOf(nftAmounts[0].bakcTokenId)).to.equal(user.address);
+    });
+
+    it("should allow users to claim rewards from a pair", async () => {
+        const nftAmounts = [
+            {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
+            {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
+            {mainTokenId: 2, bakcTokenId: 2, amount: units(300)},
+            {mainTokenId: 3, bakcTokenId: 3, amount: units(400)}
+        ];
+
+        const totalAmount = nftAmounts.reduce((s, e) => {
+            return e.amount.add(s);
+        }, BigNumber.from(0));
+
+        const depositAddress = await strategy.depositAddress(user.address);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bayc.mint(depositAddress, nftAmounts[i].mainTokenId);
+        }
+
+        await ape.mint(user.address, totalAmount.mul(2));
+        await ape.connect(user).approve(strategy.address, totalAmount.mul(2));
+
+        await strategy.afterDeposit(
+            user.address, 
+            nftAmounts.map(e => e.mainTokenId), 
+            new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
+        );
+        
+        await bakc.connect(user).setApprovalForAll(strategy.address, true);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bakc.mint(user.address, nftAmounts[i].bakcTokenId);
+        }
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
+
+        await strategy.connect(user).claimBAKC([{ mainTokenId: nftAmounts[0].mainTokenId, bakcTokenId: nftAmounts[0].bakcTokenId }], user.address);
+
+        expect(await ape.balanceOf(user.address)).to.equal(units(1));
+    });
+
     it("should allow the vault to withdraw NFTs", async () => {
         const nftAmounts = [
-            {tokenId: 0, amount: units(100)},
-            {tokenId: 1, amount: units(200)},
-            {tokenId: 2, amount: units(300)},
-            {tokenId: 3, amount: units(400)}
+            {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
+            {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
+            {mainTokenId: 2, bakcTokenId: 2, amount: units(300)},
+            {mainTokenId: 3, bakcTokenId: 3, amount: units(400)}
         ];
         
         const totalAmount = nftAmounts.reduce((s, e) => {
@@ -260,32 +431,40 @@ describe("ApeStakingStrategy", () => {
 
         const depositAddress = await strategy.depositAddress(user.address);
         for (let i = 0; i < nftAmounts.length; i++) {
-            await bayc.mint(depositAddress, nftAmounts[i].tokenId);
+            await bayc.mint(depositAddress, nftAmounts[i].mainTokenId);
         }
 
-        await ape.mint(user.address, totalAmount);
-        await ape.connect(user).approve(strategy.address, totalAmount);
+        await ape.mint(user.address, totalAmount.mul(2));
+        await ape.connect(user).approve(strategy.address, totalAmount.mul(2));
 
         await strategy.afterDeposit(
             user.address, 
-            nftAmounts.map(e => e.tokenId), 
+            nftAmounts.map(e => e.mainTokenId), 
             new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
         );
+
+        await bakc.connect(user).setApprovalForAll(strategy.address, true);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bakc.mint(user.address, nftAmounts[i].bakcTokenId);
+        }
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
         
         const toWithdraw = nftAmounts[nftAmounts.length - 1];
         
-        await expect(strategy.withdraw(owner.address, owner.address, toWithdraw.tokenId)).to.be.revertedWith("Unauthorized()");
-        await strategy.withdraw(user.address, owner.address, toWithdraw.tokenId);
+        await expect(strategy.withdraw(owner.address, owner.address, toWithdraw.mainTokenId)).to.be.revertedWith("Unauthorized()");
+        await strategy.withdraw(user.address, owner.address, toWithdraw.mainTokenId);
         
-        expect(await bayc.ownerOf(toWithdraw.tokenId)).to.equal(owner.address);
-        expect(await ape.balanceOf(user.address)).to.equal(toWithdraw.amount);
-        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.sub(toWithdraw.amount));
+        expect(await bayc.ownerOf(toWithdraw.mainTokenId)).to.equal(owner.address);
+        expect(await bakc.ownerOf(toWithdraw.bakcTokenId)).to.equal(user.address);
+        expect(await ape.balanceOf(user.address)).to.equal(toWithdraw.amount.mul(2));
+        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.sub(toWithdraw.amount).mul(2));
         
-        await strategy.connect(user).withdrawStakedTokens([nftAmounts[0]], user.address);
-        await strategy.withdraw(user.address, owner.address, nftAmounts[0].tokenId);
+        await strategy.connect(user).withdrawTokensMain([{ tokenId: nftAmounts[0].mainTokenId, amount: nftAmounts[0].amount }], user.address);
+        await strategy.withdraw(user.address, owner.address, nftAmounts[0].mainTokenId);
 
-        expect(await bayc.ownerOf(nftAmounts[0].tokenId)).to.equal(owner.address);
-        expect(await ape.balanceOf(user.address)).to.equal(toWithdraw.amount.add(nftAmounts[0].amount));
-        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.sub(toWithdraw.amount).sub(nftAmounts[0].amount));
+        expect(await bayc.ownerOf(nftAmounts[0].mainTokenId)).to.equal(owner.address);
+        expect(await ape.balanceOf(user.address)).to.equal(toWithdraw.amount.add(nftAmounts[0].amount).mul(2));
+        expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.sub(toWithdraw.amount).sub(nftAmounts[0].amount).mul(2));
     });
 });

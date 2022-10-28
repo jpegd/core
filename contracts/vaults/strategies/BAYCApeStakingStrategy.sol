@@ -4,17 +4,53 @@ pragma solidity ^0.8.4;
 import "./AbstractApeStakingStrategy.sol";
 
 contract BAYCApeStakingStrategy is AbstractApeStakingStrategy {
-    
-    function _depositSelector() internal override pure returns (bytes4) {
+    function _depositSelector() internal pure override returns (bytes4) {
         return IApeStaking.depositBAYC.selector;
     }
 
-    function _withdrawSelector() internal override pure returns (bytes4) {
+    function _withdrawSelector() internal pure override returns (bytes4) {
         return IApeStaking.withdrawBAYC.selector;
     }
 
-    function _claimSelector() internal override pure returns (bytes4) {
+    function _claimSelector() internal pure override returns (bytes4) {
         return IApeStaking.claimBAYC.selector;
     }
 
+    function _depositBAKCCalldata(
+        IApeStaking.PairNftWithAmount[] calldata _nfts
+    ) internal pure override returns (bytes memory) {
+        return
+            abi.encodeWithSelector(
+                IApeStaking.depositBAKC.selector,
+                _nfts,
+                new IApeStaking.PairNftWithAmount[](0)
+            );
+    }
+
+    function _withdrawBAKCCalldata(IApeStaking.PairNftWithAmount[] memory _nfts)
+        internal
+        pure
+        override
+        returns (bytes memory)
+    {
+        return
+            abi.encodeWithSelector(
+                IApeStaking.withdrawBAKC.selector,
+                _nfts,
+                new IApeStaking.PairNftWithAmount[](0)
+            );
+    }
+
+    function _claimBAKCCalldata(
+        IApeStaking.PairNft[] memory _nfts,
+        address _recipient
+    ) internal pure override returns (bytes memory) {
+        return
+            abi.encodeWithSelector(
+                IApeStaking.claimBAKC.selector,
+                _nfts,
+                new IApeStaking.PairNftWithAmount[](0),
+                _recipient
+            );
+    }
 }

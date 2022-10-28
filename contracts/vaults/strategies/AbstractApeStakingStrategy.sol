@@ -21,6 +21,7 @@ abstract contract AbstractApeStakingStrategy is
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using AddressUpgradeable for address;
 
+    error BAKCPaired(uint256 nftIndex);
     error ZeroAddress();
     error InvalidLength();
     error Unauthorized();
@@ -29,23 +30,29 @@ abstract contract AbstractApeStakingStrategy is
 
     IApeStaking public apeStaking;
     IERC20Upgradeable public ape;
-    address public nftContract;
-    uint256 public poolId;
+    address public mainNftContract;
+    IERC721Upgradeable public bakcContract;
+    uint256 public mainPoolId;
+    uint256 public bakcPoolId;
 
     address public clonesImplementation;
 
     function initialize(
         address _apeStaking,
         address _ape,
-        address _nftContract,
-        uint256 _poolId,
+        address _mainNftContract,
+        address _bakcContract,
+        uint256 _mainPoolId,
+        uint256 _backPoolId,
         address _clonesImplementation
     ) external initializer {
         if (_apeStaking == address(0)) revert ZeroAddress();
 
         if (_ape == address(0)) revert ZeroAddress();
 
-        if (_nftContract == address(0)) revert ZeroAddress();
+        if (_mainNftContract == address(0)) revert ZeroAddress();
+
+        if (_bakcContract == address(0)) revert ZeroAddress();
 
         if (_clonesImplementation == address(0)) revert ZeroAddress();
 
@@ -53,8 +60,10 @@ abstract contract AbstractApeStakingStrategy is
 
         apeStaking = IApeStaking(_apeStaking);
         ape = IERC20Upgradeable(_ape);
-        nftContract = _nftContract;
-        poolId = _poolId;
+        mainNftContract = _mainNftContract;
+        bakcContract = IERC721Upgradeable(_bakcContract);
+        mainPoolId = _mainPoolId;
+        bakcPoolId = _backPoolId;
         clonesImplementation = _clonesImplementation;
 
         _pause();
@@ -66,7 +75,7 @@ abstract contract AbstractApeStakingStrategy is
 
     /// @return The user proxy address for `_account`
     function depositAddress(address _account)
-        external
+        public
         view
         override
         returns (address)
@@ -86,7 +95,8 @@ abstract contract AbstractApeStakingStrategy is
         _unpause();
     }
 
-    /// @notice Function called by the NFT Vault after sending NFTs to the address calculated by {depositAddress}
+    /// @notice Function called by the NFT Vault after sending NFTs to the address calculated by {depositAddress}.
+    /// Deploys a clone contract at `depositAddress(_owner)` if it doesn't exist and stakes APE tokens
     /// @param _owner The owner of the NFTs that have been deposited
     /// @param _nftIndexes The indexes of the NFTs that have been deposited
     /// @param _data Array containing the amounts of tokens to stake with the NFTs
@@ -98,73 +108,54 @@ abstract contract AbstractApeStakingStrategy is
         uint256 totalAmount;
         IApeStaking.SingleNft[] memory nfts;
 
-        {
-            uint256[] memory amounts = abi.decode(_data, (uint256[]));
-            uint256 length = amounts.length;
+        uint256[] memory amounts = abi.decode(_data, (uint256[]));
+        uint256 length = amounts.length;
+        if (length != _nftIndexes.length) revert InvalidLength();
 
-            if (length != _nftIndexes.length) revert InvalidLength();
+        nfts = new IApeStaking.SingleNft[](length);
 
-            nfts = new IApeStaking.SingleNft[](length);
-
-            for (uint256 i; i < length; ++i) {
-                uint256 amount = amounts[i];
-                totalAmount += amount;
-                nfts[i] = IApeStaking.SingleNft({
-                    tokenId: _nftIndexes[i],
-                    amount: amount
-                });
-            }
+        for (uint256 i; i < length; ++i) {
+            uint256 amount = amounts[i];
+            totalAmount += amount;
+            nfts[i] = IApeStaking.SingleNft({
+                tokenId: _nftIndexes[i],
+                amount: amount
+            });
         }
 
-        address clone;
+        address implementation = clonesImplementation;
+        bytes32 salt = _salt(_owner);
+        address clone = ClonesUpgradeable.predictDeterministicAddress(
+            implementation,
+            salt
+        );
 
-        address[] memory targets;
-        bytes[] memory data;
-        uint256[] memory values;
+        IERC20Upgradeable _ape = ape;
+        _ape.safeTransferFrom(_owner, clone, totalAmount);
 
-        {
-            address implementation = clonesImplementation;
-            bytes32 salt = _salt(_owner);
-            clone = ClonesUpgradeable.predictDeterministicAddress(
-                implementation,
-                salt
-            );
+        IApeStaking _apeStaking = apeStaking;
 
-            IERC20Upgradeable _ape = ape;
-            _ape.safeTransferFrom(_owner, clone, totalAmount);
-
-            IApeStaking _apeStaking = apeStaking;
-
-            if (!clone.isContract()) {
-                ClonesUpgradeable.cloneDeterministic(implementation, salt);
-                ISimpleUserProxy(clone).initialize(address(this));
-                targets = new address[](2);
-                data = new bytes[](2);
-                values = new uint256[](2);
-
-                targets[0] = address(_ape);
-                data[0] = abi.encodeWithSelector(
+        if (!clone.isContract()) {
+            ClonesUpgradeable.cloneDeterministic(implementation, salt);
+            ISimpleUserProxy(clone).initialize(address(this));
+            ISimpleUserProxy(clone).doCall(
+                address(_ape),
+                abi.encodeWithSelector(
                     IERC20Upgradeable.approve.selector,
                     address(_apeStaking),
                     2**256 - 1
-                );
-            } else {
-                targets = new address[](1);
-                data = new bytes[](1);
-                values = new uint256[](1);
-            }
-
-            targets[targets.length - 1] = address(_apeStaking);
-            data[data.length - 1] = abi.encodeWithSelector(
-                _depositSelector(),
-                nfts
+                )
             );
         }
 
-        ISimpleUserProxy(clone).doCalls(targets, data, values);
+        ISimpleUserProxy(clone).doCall(
+            address(_apeStaking),
+            abi.encodeWithSelector(_depositSelector(), nfts)
+        );
     }
 
     /// @notice Function called by the NFT Vault to withdraw an NFT from the strategy.
+    /// Staked APE tokens and the committed BAKC (if there is one) are sent back to `_owner`
     /// @param _owner The owner of the NFT to withdraw
     /// @param _recipient The address to send the NFT to
     /// @param _nftIndex Index of the NFT to withdraw
@@ -173,61 +164,98 @@ abstract contract AbstractApeStakingStrategy is
         address _recipient,
         uint256 _nftIndex
     ) external override onlyRole(VAULT_ROLE) {
-        address clone = ClonesUpgradeable.predictDeterministicAddress(
-            clonesImplementation,
-            _salt(_owner)
-        );
-        if (!clone.isContract()) revert Unauthorized();
+        address clone = _getCloneOrRevert(_owner);
 
         IApeStaking _apeStaking = apeStaking;
-        (uint256 stakedAmount, ) = _apeStaking.nftPosition(poolId, _nftIndex);
+        uint256 _mainPoolId = mainPoolId;
 
-        address[] memory targets;
-        bytes[] memory data;
-        uint256[] memory values;
-
-        if (stakedAmount > 0) {
-            IApeStaking.SingleNft[] memory nfts = new IApeStaking.SingleNft[](
-                1
+        {
+            (uint256 stakedAmount, ) = _apeStaking.nftPosition(
+                _mainPoolId,
+                _nftIndex
             );
-            nfts[0] = IApeStaking.SingleNft({
-                tokenId: _nftIndex,
-                amount: stakedAmount
-            });
+            if (stakedAmount > 0) {
+                IApeStaking.SingleNft[]
+                    memory nfts = new IApeStaking.SingleNft[](1);
+                nfts[0] = IApeStaking.SingleNft({
+                    tokenId: _nftIndex,
+                    amount: stakedAmount
+                });
 
-            targets = new address[](2);
-            data = new bytes[](2);
-            values = new uint256[](2);
-
-            targets[0] = address(_apeStaking);
-            data[0] = abi.encodeWithSelector(_withdrawSelector(), nfts, _owner);
-        } else {
-            targets = new address[](1);
-            data = new bytes[](1);
-            values = new uint256[](1);
+                ISimpleUserProxy(clone).doCall(
+                    address(_apeStaking),
+                    abi.encodeWithSelector(_withdrawSelector(), nfts, _owner)
+                );
+            }
         }
 
-        targets[targets.length - 1] = nftContract;
-        data[data.length - 1] = abi.encodeWithSelector(
-            IERC721Upgradeable.transferFrom.selector,
-            clone,
-            _recipient,
-            _nftIndex
-        );
+        {
+            (uint256 bakcIndex, bool isPaired) = _apeStaking.mainToBakc(
+                _mainPoolId,
+                _nftIndex
+            );
+            if (isPaired) {
+                {
+                    (uint256 stakedAmount, ) = _apeStaking.nftPosition(
+                        bakcPoolId,
+                        bakcIndex
+                    );
+                    IApeStaking.PairNftWithAmount[]
+                        memory nfts = new IApeStaking.PairNftWithAmount[](1);
+                    nfts[0] = IApeStaking.PairNftWithAmount({
+                        mainTokenId: _nftIndex,
+                        bakcTokenId: bakcIndex,
+                        amount: stakedAmount
+                    });
+                    ISimpleUserProxy(clone).doCall(
+                        address(_apeStaking),
+                        _withdrawBAKCCalldata(nfts)
+                    );
+                }
 
-        ISimpleUserProxy(clone).doCalls(targets, data, values);
+                IERC20Upgradeable _ape = ape;
+                uint256 balance = _ape.balanceOf(clone);
+
+                ISimpleUserProxy(clone).doCall(
+                    address(_ape),
+                    abi.encodeWithSelector(
+                        _ape.transfer.selector,
+                        _owner,
+                        balance
+                    )
+                );
+
+                ISimpleUserProxy(clone).doCall(
+                    address(bakcContract),
+                    abi.encodeWithSelector(
+                        IERC721Upgradeable.transferFrom.selector,
+                        clone,
+                        _owner,
+                        bakcIndex
+                    )
+                );
+            }
+        }
+
+        ISimpleUserProxy(clone).doCall(
+            mainNftContract,
+            abi.encodeWithSelector(
+                IERC721Upgradeable.transferFrom.selector,
+                clone,
+                _recipient,
+                _nftIndex
+            )
+        );
     }
 
     /// @notice Allows users to stake additional tokens for NFTs that have already been deposited in the strategy
-    /// @param _nfts NFT IDs and token amounts to deposit 
-    function stakeTokens(IApeStaking.SingleNft[] calldata _nfts) external {
-        address clone = ClonesUpgradeable.predictDeterministicAddress(
-            clonesImplementation,
-            _salt(msg.sender)
-        );
-        if (!clone.isContract()) revert Unauthorized();
-
+    /// @param _nfts NFT IDs and token amounts to deposit
+    function stakeTokensMain(IApeStaking.SingleNft[] calldata _nfts) external {
         uint256 length = _nfts.length;
+        if (length == 0) revert InvalidLength();
+
+        address clone = _getCloneOrRevert(msg.sender);
+
         uint256 totalAmount;
         for (uint256 i; i < length; ++i) {
             totalAmount += _nfts[i].amount;
@@ -235,50 +263,160 @@ abstract contract AbstractApeStakingStrategy is
 
         ape.safeTransferFrom(msg.sender, clone, totalAmount);
 
-        _apeStakingCall(ISimpleUserProxy(clone), abi.encodeWithSelector(_depositSelector(), _nfts));
+        ISimpleUserProxy(clone).doCall(
+            address(apeStaking),
+            abi.encodeWithSelector(_depositSelector(), _nfts)
+        );
+    }
+
+    /// @notice Allows users to pair their committed NFTs with BAKCs in the BAKC pool and increase their APE stake.
+    /// Automatically commits the BAKCs specified in `_nfts` if they aren't already
+    /// @param _nfts NFT IDs, BAKC IDs and token amounts to deposit
+    function stakeTokensBAKC(IApeStaking.PairNftWithAmount[] calldata _nfts)
+        external
+    {
+        uint256 length = _nfts.length;
+        if (length == 0) revert InvalidLength();
+
+        address clone = _getCloneOrRevert(msg.sender);
+
+        uint256 totalAmount;
+        IERC721Upgradeable bakc = bakcContract;
+        for (uint256 i; i < length; i++) {
+            IApeStaking.PairNftWithAmount memory pair = _nfts[i];
+
+            if (bakc.ownerOf(pair.bakcTokenId) != clone)
+                bakc.transferFrom(msg.sender, clone, pair.bakcTokenId);
+
+            totalAmount += _nfts[i].amount;
+        }
+
+        ape.safeTransferFrom(msg.sender, clone, totalAmount);
+
+        ISimpleUserProxy(clone).doCall(
+            address(apeStaking),
+            _depositBAKCCalldata(_nfts)
+        );
     }
 
     /// @notice Allows users to withdraw tokens from NFTs that have been deposited in the strategy
     /// @param _nfts NFT IDs and token amounts to withdraw
     /// @param _recipient The address to send the tokens to
-    function withdrawStakedTokens(
+    function withdrawTokensMain(
         IApeStaking.SingleNft[] calldata _nfts,
         address _recipient
     ) external {
-        _apeStakingCall(
+        if (_nfts.length == 0) revert InvalidLength();
+
+        ISimpleUserProxy clone = ISimpleUserProxy(
+            _getCloneOrRevert(msg.sender)
+        );
+
+        clone.doCall(
+            address(apeStaking),
             abi.encodeWithSelector(_withdrawSelector(), _nfts, _recipient)
         );
     }
 
+    /// @notice Allows users to withdraw tokens deposited in the BAKC pool
+    /// @param _nfts NFT IDs, BAKC IDs and token amounts to withdraw
+    /// @param _recipient The Address to send the tokens to
+    function withdrawTokensBAKC(
+        IApeStaking.PairNftWithAmount[] calldata _nfts,
+        address _recipient
+    ) external {
+        uint256 length = _nfts.length;
+        if (length == 0) revert InvalidLength();
+
+        address clone = _getCloneOrRevert(msg.sender);
+
+        ISimpleUserProxy(clone).doCall(
+            address(apeStaking),
+            _withdrawBAKCCalldata(_nfts)
+        );
+
+        //the withdrawBAKC function in ApeStaking lacks a recipient argument, so we have to manually send APE tokens
+        IERC20Upgradeable _ape = ape;
+        uint256 balance = _ape.balanceOf(clone);
+
+        ISimpleUserProxy(clone).doCall(
+            address(_ape),
+            abi.encodeWithSelector(_ape.transfer.selector, _recipient, balance)
+        );
+    }
+
+    /// @notice Allows users to withdraw committed BAKC NFTs.
+    /// The NFTs need to be unpaired (no APE staked in the BAKC pool)
+    /// @param _nfts The BAKC IDs to withdraw
+    /// @param _recipient The address to send NFTs to
+    function withdrawBAKC(uint256[] calldata _nfts, address _recipient)
+        external
+    {
+        uint256 length = _nfts.length;
+        if (length == 0) revert InvalidLength();
+
+        address clone = _getCloneOrRevert(msg.sender);
+
+        IApeStaking _apeStaking = apeStaking;
+        address _bakcContract = address(bakcContract);
+
+        uint256 poolId = mainPoolId;
+        for (uint256 i; i < length; ++i) {
+            uint256 index = _nfts[i];
+            (, bool isPaired) = _apeStaking.bakcToMain(_nfts[i], poolId);
+            if (isPaired) revert BAKCPaired(index);
+
+            ISimpleUserProxy(clone).doCall(
+                _bakcContract,
+                abi.encodeWithSelector(
+                    IERC721Upgradeable.transferFrom.selector,
+                    clone,
+                    _recipient,
+                    index
+                )
+            );
+        }
+    }
+
     /// @notice Allows users to claim rewards from the Ape staking contract
-    /// @param _nfts NFT IDs to claim tokens for 
-    function claim(uint256[] memory _nfts, address _recipient) external {
-        _apeStakingCall(
+    /// @param _nfts NFT IDs to claim tokens for
+    function claimMain(uint256[] memory _nfts, address _recipient) external {
+        uint256 length = _nfts.length;
+        if (length == 0) revert InvalidLength();
+
+        ISimpleUserProxy clone = ISimpleUserProxy(
+            _getCloneOrRevert(msg.sender)
+        );
+        clone.doCall(
+            address(apeStaking),
             abi.encodeWithSelector(_claimSelector(), _nfts, _recipient)
         );
     }
 
-    function _apeStakingCall(bytes memory _data) internal {
-        address clone = ClonesUpgradeable.predictDeterministicAddress(
-            clonesImplementation,
-            _salt(msg.sender)
-        );
-        if (!clone.isContract()) revert Unauthorized();
+    /// @notice Allows users to claim rewards from the BAKC pool
+    /// @param _nfts Pair NFT IDs to claim for
+    function claimBAKC(IApeStaking.PairNft[] calldata _nfts, address _recipient)
+        external
+    {
+        uint256 length = _nfts.length;
+        if (length == 0) revert InvalidLength();
 
-        _apeStakingCall(ISimpleUserProxy(clone), _data);
+        ISimpleUserProxy clone = ISimpleUserProxy(
+            _getCloneOrRevert(msg.sender)
+        );
+        clone.doCall(
+            address(apeStaking),
+            _claimBAKCCalldata(_nfts, _recipient)
+        );
     }
 
-    function _apeStakingCall(ISimpleUserProxy _clone, bytes memory _data)
+    function _getCloneOrRevert(address _account)
         internal
+        view
+        returns (address clone)
     {
-        address[] memory targets = new address[](1);
-        bytes[] memory data = new bytes[](1);
-        uint256[] memory values = new uint256[](1);
-
-        targets[0] = address(apeStaking);
-        data[0] = _data;
-
-        _clone.doCalls(targets, data, values);
+        clone = depositAddress(_account);
+        if (!clone.isContract()) revert Unauthorized();
     }
 
     function _salt(address _address) internal pure returns (bytes32) {
@@ -290,4 +428,19 @@ abstract contract AbstractApeStakingStrategy is
     function _withdrawSelector() internal view virtual returns (bytes4);
 
     function _claimSelector() internal view virtual returns (bytes4);
+
+    function _depositBAKCCalldata(
+        IApeStaking.PairNftWithAmount[] calldata _nfts
+    ) internal view virtual returns (bytes memory);
+
+    function _withdrawBAKCCalldata(IApeStaking.PairNftWithAmount[] memory _nfts)
+        internal
+        view
+        virtual
+        returns (bytes memory);
+
+    function _claimBAKCCalldata(
+        IApeStaking.PairNft[] memory _nfts,
+        address _recipient
+    ) internal view virtual returns (bytes memory);
 }

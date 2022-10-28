@@ -17,4 +17,41 @@ contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
         return IApeStaking.claimBAYC.selector;
     }
 
+    function _depositBAKCCalldata(
+        IApeStaking.PairNftWithAmount[] calldata _nfts
+    ) internal pure override returns (bytes memory) {
+        return
+            abi.encodeWithSelector(
+                IApeStaking.depositBAKC.selector,
+                new IApeStaking.PairNftWithAmount[](0),
+                _nfts
+            );
+    }
+
+    function _withdrawBAKCCalldata(IApeStaking.PairNftWithAmount[] memory _nfts)
+        internal
+        pure
+        override
+        returns (bytes memory)
+    {
+        return
+            abi.encodeWithSelector(
+                IApeStaking.withdrawBAKC.selector,
+                new IApeStaking.PairNftWithAmount[](0),
+                _nfts
+            );
+    }
+
+    function _claimBAKCCalldata(
+        IApeStaking.PairNft[] memory _nfts,
+        address _recipient
+    ) internal pure override returns (bytes memory) {
+        return
+            abi.encodeWithSelector(
+                IApeStaking.claimBAKC.selector,
+                new IApeStaking.PairNftWithAmount[](0),
+                _nfts,
+                _recipient
+            );
+    }
 }
