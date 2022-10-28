@@ -7,23 +7,42 @@ import "./TestERC20.sol";
 import "../interfaces/IApeStaking.sol";
 
 contract MockApeStaking is IApeStaking {
+    struct PairingStatus {
+        uint256 tokenId;
+        bool isPaired;
+    }
 
     uint256 constant BAYC_ID = 1;
     uint256 constant MAYC_ID = 2;
+    uint256 constant BAKC_ID = 3;
 
     TestERC20 ape;
     IERC721 bayc;
     IERC721 mayc;
+    IERC721 bakc;
 
     mapping(uint256 => mapping(uint256 => uint256)) depositedAmounts;
+    mapping(uint256 => mapping(uint256 => PairingStatus)) public override bakcToMain;
+    mapping(uint256 => mapping(uint256 => PairingStatus)) public override mainToBakc;
 
-    constructor(TestERC20 _ape, IERC721 _bayc, IERC721 _mayc) {
+    constructor(
+        TestERC20 _ape,
+        IERC721 _bayc,
+        IERC721 _mayc,
+        IERC721 _bakc
+    ) {
         ape = _ape;
         bayc = _bayc;
         mayc = _mayc;
+        bakc = _bakc;
     }
 
-    function nftPosition(uint256 _poolId, uint256 _nftId) external view override returns (uint256, int256) {
+    function nftPosition(uint256 _poolId, uint256 _nftId)
+        external
+        view
+        override
+        returns (uint256, int256)
+    {
         return (depositedAmounts[_poolId][_nftId], 0);
     }
 
@@ -35,21 +54,57 @@ contract MockApeStaking is IApeStaking {
         _depositNFT(_nfts, MAYC_ID, mayc);
     }
 
-    function withdrawBAYC(SingleNft[] calldata _nfts, address _recipient) external override {
+    function depositBAKC(
+        PairNftWithAmount[] calldata _baycPairs,
+        PairNftWithAmount[] calldata _maycPairs
+    ) external override {
+        _depositPairNft(BAYC_ID, _baycPairs, bayc);
+        _depositPairNft(MAYC_ID, _maycPairs, mayc);
+    }
+
+    function withdrawBAYC(SingleNft[] calldata _nfts, address _recipient)
+        external
+        override
+    {
         _withdrawNFT(_nfts, _recipient, BAYC_ID, bayc);
     }
 
-    function withdrawMAYC(SingleNft[] calldata _nfts, address _recipient) external override {
+    function withdrawMAYC(SingleNft[] calldata _nfts, address _recipient)
+        external
+        override
+    {
         _withdrawNFT(_nfts, _recipient, MAYC_ID, mayc);
     }
-    function claimBAYC(uint256[] calldata _nfts, address _recipient) external override {
-        _claimNFT(_nfts, _recipient, bayc);
-    }
-    function claimMAYC(uint256[] calldata _nfts, address _recipient) external override {
-        _claimNFT(_nfts, _recipient, mayc);
+
+    function withdrawBAKC(PairNftWithAmount[] calldata _baycPairs, PairNftWithAmount[] calldata _maycPairs) external override {
+        _withdrawPairNft(BAYC_ID, _baycPairs, bayc);
+        _withdrawPairNft(MAYC_ID, _maycPairs, mayc);
     }
 
-    function _depositNFT(SingleNft[] calldata _nfts, uint256 poolId, IERC721 _contract) internal {
+    function claimBAYC(uint256[] calldata _nfts, address _recipient)
+        external
+        override
+    {
+        _claimNFT(_nfts, _recipient, bayc);
+    }
+
+    function claimMAYC(uint256[] calldata _nfts, address _recipient)
+        external
+        override
+    {
+        _claimNFT(_nfts, _recipient, mayc);
+    }
+    
+    function claimBAKC(PairNft[] calldata _baycPairs, PairNft[] calldata _maycPairs, address _recipient) external override {
+        _claimPairNft(_baycPairs, _recipient, bayc);
+        _claimPairNft(_maycPairs, _recipient, mayc);
+    }
+
+    function _depositNFT(
+        SingleNft[] calldata _nfts,
+        uint256 poolId,
+        IERC721 _contract
+    ) internal {
         uint256 totalAmount;
         for (uint256 i; i < _nfts.length; ++i) {
             SingleNft memory nft = _nfts[i];
@@ -61,7 +116,33 @@ contract MockApeStaking is IApeStaking {
         ape.transferFrom(msg.sender, address(this), totalAmount);
     }
 
-    function _withdrawNFT(SingleNft[] calldata _nfts, address _recipient, uint256 poolId, IERC721 _contract) internal {
+    function _depositPairNft(
+        uint256 _poolId,
+        PairNftWithAmount[] calldata _pairs,
+        IERC721 _contract
+    ) internal {
+        uint256 totalAmount;
+        IERC721 _bakc = bakc;
+        uint256 bakcID = BAKC_ID;
+        for (uint256 i; i < _pairs.length; ++i) {
+            PairNftWithAmount memory nft = _pairs[i];
+            require(_contract.ownerOf(nft.mainTokenId) == msg.sender);
+            require(_bakc.ownerOf(nft.bakcTokenId) == msg.sender);
+            depositedAmounts[bakcID][nft.bakcTokenId] += nft.amount;
+            bakcToMain[nft.bakcTokenId][_poolId] = PairingStatus(nft.mainTokenId, true);
+            mainToBakc[_poolId][nft.mainTokenId] = PairingStatus(nft.bakcTokenId, true);
+            totalAmount += nft.amount;
+        }
+
+        ape.transferFrom(msg.sender, address(this), totalAmount);
+    }
+
+    function _withdrawNFT(
+        SingleNft[] calldata _nfts,
+        address _recipient,
+        uint256 poolId,
+        IERC721 _contract
+    ) internal {
         uint256 totalAmount;
         for (uint256 i; i < _nfts.length; ++i) {
             SingleNft memory nft = _nfts[i];
@@ -73,7 +154,32 @@ contract MockApeStaking is IApeStaking {
         ape.transfer(_recipient, totalAmount);
     }
 
-    function _claimNFT(uint256[] calldata _nfts, address _recipient, IERC721 _contract) internal {
+    function _withdrawPairNft(
+        uint256 _poolId,
+        PairNftWithAmount[] calldata _pairs,
+        IERC721 _contract
+    ) internal {
+        uint256 totalAmount;
+        IERC721 _bakc = bakc;
+        uint256 bakcID = BAKC_ID;
+        for (uint256 i; i < _pairs.length; ++i) {
+            PairNftWithAmount memory nft = _pairs[i];
+            require(_contract.ownerOf(nft.mainTokenId) == msg.sender);
+            require(_bakc.ownerOf(nft.bakcTokenId) == msg.sender);
+            depositedAmounts[bakcID][nft.bakcTokenId] -= nft.amount;
+            bakcToMain[nft.bakcTokenId][_poolId] = PairingStatus(0, false);
+            mainToBakc[_poolId][nft.mainTokenId] = PairingStatus(0, false);
+            totalAmount += nft.amount;
+        }
+
+        ape.transfer(msg.sender, totalAmount);
+    }
+
+    function _claimNFT(
+        uint256[] calldata _nfts,
+        address _recipient,
+        IERC721 _contract
+    ) internal {
         for (uint256 i; i < _nfts.length; ++i) {
             require(_contract.ownerOf(_nfts[i]) == msg.sender);
         }
@@ -81,4 +187,17 @@ contract MockApeStaking is IApeStaking {
         ape.mint(_recipient, _nfts.length * 1 ether);
     }
 
+    function _claimPairNft(
+        PairNft[] calldata _pairs,
+        address _recipient,
+        IERC721 _contract
+    ) internal {
+        IERC721 _bakc = bakc;
+        for (uint256 i; i < _pairs.length; ++i) {
+            require(_bakc.ownerOf(_pairs[i].bakcTokenId) == msg.sender);
+            require(_contract.ownerOf(_pairs[i].mainTokenId) == msg.sender);
+        }
+
+        ape.mint(_recipient, _pairs.length * 1 ether);
+    }
 }
