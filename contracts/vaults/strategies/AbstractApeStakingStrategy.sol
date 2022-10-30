@@ -21,7 +21,6 @@ abstract contract AbstractApeStakingStrategy is
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using AddressUpgradeable for address;
 
-    error BAKCPaired(uint256 nftIndex);
     error ZeroAddress();
     error InvalidLength();
     error Unauthorized();
@@ -346,7 +345,6 @@ abstract contract AbstractApeStakingStrategy is
     }
 
     /// @notice Allows users to withdraw committed BAKC NFTs.
-    /// The NFTs need to be unpaired (no APE staked in the BAKC pool)
     /// @param _nfts The BAKC IDs to withdraw
     /// @param _recipient The address to send NFTs to
     function withdrawBAKC(uint256[] calldata _nfts, address _recipient)
@@ -360,11 +358,26 @@ abstract contract AbstractApeStakingStrategy is
         IApeStaking _apeStaking = apeStaking;
         address _bakcContract = address(bakcContract);
 
-        uint256 poolId = mainPoolId;
+        uint256 _mainPoolId = mainPoolId;
+        uint256 _bakcPoolId = bakcPoolId;
         for (uint256 i; i < length; ++i) {
             uint256 index = _nfts[i];
-            (, bool isPaired) = _apeStaking.bakcToMain(_nfts[i], poolId);
-            if (isPaired) revert BAKCPaired(index);
+
+            (uint256 mainIndex, bool isPaired) = _apeStaking.bakcToMain(_nfts[i], _mainPoolId);
+            if (isPaired) {
+                (uint256 stakedAmount, ) = _apeStaking.nftPosition(_bakcPoolId, index);
+                IApeStaking.PairNftWithAmount[] memory pairs = new IApeStaking.PairNftWithAmount[](1);
+                pairs[0] = IApeStaking.PairNftWithAmount({
+                    mainTokenId: mainIndex,
+                    bakcTokenId: index,
+                    amount: stakedAmount
+                });
+
+                ISimpleUserProxy(clone).doCall(
+                    address(_apeStaking),
+                    _withdrawBAKCCalldata(pairs)
+                );
+            }
 
             ISimpleUserProxy(clone).doCall(
                 _bakcContract,
@@ -376,6 +389,15 @@ abstract contract AbstractApeStakingStrategy is
                 )
             );
         }
+
+        //the withdrawBAKC function in ApeStaking lacks a recipient argument, so we have to manually send APE tokens
+        IERC20Upgradeable _ape = ape;
+        uint256 balance = _ape.balanceOf(clone);
+
+        ISimpleUserProxy(clone).doCall(
+            address(_ape),
+            abi.encodeWithSelector(_ape.transfer.selector, _recipient, balance)
+        );
     }
 
     /// @notice Allows users to claim rewards from the Ape staking contract

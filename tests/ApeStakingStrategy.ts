@@ -338,7 +338,7 @@ describe("ApeStakingStrategy", () => {
         expect(await ape.balanceOf(user.address)).to.equal(nftAmounts[0].amount);
     });
 
-    it("should allow users to withdraw BAKC if unpaired", async () => {
+    it("should allow users to withdraw BAKC", async () => {
         const nftAmounts = [
             {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
             {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
@@ -371,12 +371,15 @@ describe("ApeStakingStrategy", () => {
 
         await strategy.connect(user).stakeTokensBAKC(nftAmounts);
 
-        await expect(strategy.connect(user).withdrawBAKC([nftAmounts[0].bakcTokenId], user.address)).to.be.revertedWith("BAKCPaired(" + nftAmounts[0].bakcTokenId + ")");
-
-        await strategy.connect(user).withdrawTokensBAKC([nftAmounts[0]], user.address);
-        await strategy.connect(user).withdrawBAKC([nftAmounts[0].bakcTokenId], user.address);
+        await strategy.connect(user).withdrawBAKC([nftAmounts[0].bakcTokenId, nftAmounts[1].bakcTokenId], user.address);
 
         expect(await bakc.ownerOf(nftAmounts[0].bakcTokenId)).to.equal(user.address);
+        expect(await bayc.ownerOf(nftAmounts[0].mainTokenId)).to.equal(depositAddress);
+
+        expect(await bakc.ownerOf(nftAmounts[1].bakcTokenId)).to.equal(user.address);
+        expect(await bayc.ownerOf(nftAmounts[1].mainTokenId)).to.equal(depositAddress);
+
+        expect(await ape.balanceOf(user.address)).to.equal(nftAmounts[0].amount.add(nftAmounts[1].amount));
     });
 
     it("should allow users to claim rewards from a pair", async () => {
