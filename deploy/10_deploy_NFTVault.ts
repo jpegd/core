@@ -179,3 +179,20 @@ task("deploy-nftprovider", "Deploys the NFTValueProvider contract")
 			});
 		}
 	})
+
+
+task("deploy-providerImpl", "Upgrades the NFTVault contract")
+.setAction(async ({ }, { network, ethers, run, upgrades }) => {
+	const Provider = await ethers.getContractFactory("NFTValueProvider");
+	const provider = await Provider.deploy()
+	console.log("deploy at: ", provider.address)
+	await provider.deployed()
+
+	if (network.name != "hardhat") {
+		console.log("Verifying NFTVault");
+		await run("verify:verify", {
+			address: provider.address,
+			constructorArguments: [],
+		});
+	}
+})
