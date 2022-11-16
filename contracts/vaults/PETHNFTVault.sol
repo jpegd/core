@@ -222,18 +222,18 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @param _nftIndex The NFT to return the credit limit of
     /// @return The PETH credit limit of the NFT at index `_nftIndex`.
-    function getCreditLimit(uint256 _nftIndex) external view returns (uint256) {
-        return _getCreditLimit(positionOwner[_nftIndex], _nftIndex);
+    function getCreditLimit(address _owner, uint256 _nftIndex) external view returns (uint256) {
+        return _getCreditLimit(_owner, _nftIndex);
     }
 
     /// @param _nftIndex The NFT to return the liquidation limit of
     /// @return The PETH liquidation limit of the NFT at index `_nftIndex`.
-    function getLiquidationLimit(uint256 _nftIndex)
+    function getLiquidationLimit(address _owner, uint256 _nftIndex)
         public
         view
         returns (uint256)
     {
-        return _getLiquidationLimit(positionOwner[_nftIndex], _nftIndex);
+        return _getLiquidationLimit(_owner, _nftIndex);
     }
 
     /// @param _nftIndex The NFT to check
@@ -246,7 +246,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 principal = position.debtPrincipal;
         return
             principal + getDebtInterest(_nftIndex) >=
-            getLiquidationLimit(_nftIndex);
+            getLiquidationLimit(positionOwner[_nftIndex], _nftIndex);
     }
 
     /// @param _nftIndex The NFT to check
