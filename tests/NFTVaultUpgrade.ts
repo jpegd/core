@@ -234,7 +234,7 @@ describe("NFTVaultUpgrade", () => {
         expect(await nftVault.openPositionsIndexes()).to.deep.include.members([BigNumber.from(index.toString())]);
         expect(await nftVault.totalPositions()).to.equal(positionsBefore.add(1));
 
-        expect(await nftVault.getCreditLimit(index)).to.equal(borrowAmount);
+        expect(await nftVault.getCreditLimit(user._address, index)).to.equal(borrowAmount);
         expect((await nftVault.positions(index)).debtPrincipal).to.equal(borrowAmount.div(4).mul(2));
     });
 
