@@ -138,25 +138,10 @@ describe("NFTVaultUpgrade", () => {
         ethOracle = IAggregatorV3Interface__factory.connect("0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", ethers.provider);
         floorOracle = IAggregatorV3Interface__factory.connect("0x0CA05B24795eb4f5bA5237e1D4470048cc0fE235", ethers.provider);
 
-        const NFTValueProvider = await ethers.getContractFactory("NFTValueProvider");
-        nftValueProvider = NFTValueProvider.attach("0x5b9cAA47A52e4BfbBce2f2A9f858c2A501B48C42");
-
-        const providerImpl = (await upgrades.prepareUpgrade(nftValueProvider.address, NFTValueProvider)).toString();
+        nftValueProvider = <NFTValueProvider>await ethers.getContractAt("NFTValueProvider", "0x5b9cAA47A52e4BfbBce2f2A9f858c2A501B48C42")
 
         const ProxyAdmin = await getProxyAdminFactory(hre);
         const proxyAdmin = ProxyAdmin.attach("0x4156d093F5e6D649fCDccdBAB733782b726b13d7");
-
-        await proxyAdmin.connect(dao).upgradeAndCall(
-            nftValueProvider.address, 
-            providerImpl, 
-            (await nftValueProvider.populateTransaction.finalizeUpgrade(
-                cigStaking.address, 
-                {numerator: 35, denominator: 100},
-                {numerator: 36, denominator: 100},
-                {numerator: 10, denominator: 100},
-                {numerator: 15, denominator: 100},
-                {numerator: 10, denominator: 100},
-            )).data);
 
         const NFTVault = await ethers.getContractFactory("NFTVault");
         nftVault = NFTVault.attach("0x271c7603AAf2BD8F68e8Ca60f4A4F22c4920259f");
