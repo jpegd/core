@@ -9,7 +9,6 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
-import "../interfaces/IJPEGCardsCigStaking.sol";
 import "../interfaces/INFTValueProvider.sol";
 
 /// @title NFT lending vault
@@ -87,10 +86,14 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     struct VaultSettings {
         Rate debtInterestApr;
-        Rate creditLimitRate;
-        Rate liquidationLimitRate;
-        Rate cigStakedCreditLimitRate;
-        Rate cigStakedLiquidationLimitRate;
+        /// @custom:oz-renamed-from creditLimitRate
+        Rate unused15;
+        /// @custom:oz-renamed-from liquidationLimitRate
+        Rate unused16;
+        /// @custom:oz-renamed-from cigStakedCreditLimitRate
+        Rate unused17;
+        /// @custom:oz-renamed-from cigStakedLiquidationLimitRate
+        Rate unused18;
         /// @custom:oz-renamed-from valueIncreaseLockRate
         Rate unused12;
         Rate organizationFeeRate;
@@ -126,9 +129,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @custom:oz-retyped-from IERC20Upgradeable
     /// @custom:oz-renamed-from jpeg
     address private unused3; //Unused after upgrade
-    /// @notice JPEGCardsCigStaking, cig stakers get an higher credit limit rate and liquidation limit rate.
-    /// Immediately reverts to normal rates if the cig is unstaked.
-    IJPEGCardsCigStaking public cigStaking;
+    /// @custom:oz-renamed-from cigStaking
+    address public unused14;
+
     IERC721Upgradeable public nftContract;
 
     /// @custom:oz-renamed-from daoFloorOverride
@@ -178,13 +181,11 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _stablecoin PETH address
     /// @param _nftContract The NFT contract address. It could also be the address of an helper contract
     /// if the target NFT isn't an ERC721 (CryptoPunks as an example)
-    /// @param _cigStaking Cig staking address
     /// @param _settings Initial settings used by the contract
     function initialize(
         IStableCoin _stablecoin,
         IERC721Upgradeable _nftContract,
         INFTValueProvider _nftValueProvider,
-        IJPEGCardsCigStaking _cigStaking,
         VaultSettings calldata _settings
     ) external initializer {
         __AccessControl_init();
@@ -196,58 +197,15 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _setRoleAdmin(DAO_ROLE, DAO_ROLE);
 
         _validateRateBelowOne(_settings.debtInterestApr);
-        _validateRateBelowOne(_settings.creditLimitRate);
-        _validateRateBelowOne(_settings.liquidationLimitRate);
-        _validateRateBelowOne(_settings.cigStakedCreditLimitRate);
-        _validateRateBelowOne(_settings.cigStakedLiquidationLimitRate);
         _validateRateBelowOne(_settings.organizationFeeRate);
         _validateRateBelowOne(_settings.insurancePurchaseRate);
         _validateRateBelowOne(_settings.insuranceLiquidationPenaltyRate);
 
-        if (
-            !_greaterThan(
-                _settings.liquidationLimitRate,
-                _settings.creditLimitRate
-            )
-        ) revert InvalidRate(_settings.liquidationLimitRate);
-
-        if (
-            !_greaterThan(
-                _settings.cigStakedLiquidationLimitRate,
-                _settings.cigStakedCreditLimitRate
-            )
-        ) revert InvalidRate(_settings.cigStakedLiquidationLimitRate);
-
-        if (
-            !_greaterThan(
-                _settings.cigStakedCreditLimitRate,
-                _settings.creditLimitRate
-            )
-        ) revert InvalidRate(_settings.cigStakedCreditLimitRate);
-
-        if (
-            !_greaterThan(
-                _settings.cigStakedLiquidationLimitRate,
-                _settings.liquidationLimitRate
-            )
-        ) revert InvalidRate(_settings.cigStakedLiquidationLimitRate);
-
         stablecoin = _stablecoin;
-        cigStaking = _cigStaking;
         nftContract = _nftContract;
         nftValueProvider = _nftValueProvider;
         
         settings = _settings;
-    }
-
-    /// @dev Function called by the {ProxyAdmin} contract during the upgrade process.
-    /// Only called on existing vaults where the `initialize` function has already been called.
-    /// It won't be called in new deployments.
-    function finalizeUpgrade(INFTValueProvider _provider) external onlyRole(SETTER_ROLE) {
-        if (address(_provider) == address(0))
-            revert ZeroAddress();
-
-        nftValueProvider = _provider;
     }
 
     /// @notice Returns the number of open positions
@@ -262,26 +220,20 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return positionIndexes.values();
     }
 
-    /// @param _nftIndex The NFT to return the value of
-    /// @return The value in ETH of the NFT at index `_nftIndex`, with 18 decimals.
-    function getNFTValueETH(uint256 _nftIndex) public view returns (uint256) {
-        return nftValueProvider.getNFTValueETH(_nftIndex);
-    }
-
     /// @param _nftIndex The NFT to return the credit limit of
     /// @return The PETH credit limit of the NFT at index `_nftIndex`.
-    function getCreditLimit(uint256 _nftIndex) external view returns (uint256) {
-        return _getCreditLimit(positionOwner[_nftIndex], _nftIndex);
+    function getCreditLimit(address _owner, uint256 _nftIndex) external view returns (uint256) {
+        return _getCreditLimit(_owner, _nftIndex);
     }
 
     /// @param _nftIndex The NFT to return the liquidation limit of
     /// @return The PETH liquidation limit of the NFT at index `_nftIndex`.
-    function getLiquidationLimit(uint256 _nftIndex)
+    function getLiquidationLimit(address _owner, uint256 _nftIndex)
         public
         view
         returns (uint256)
     {
-        return _getLiquidationLimit(positionOwner[_nftIndex], _nftIndex);
+        return _getLiquidationLimit(_owner, _nftIndex);
     }
 
     /// @param _nftIndex The NFT to check
@@ -294,7 +246,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 principal = position.debtPrincipal;
         return
             principal + getDebtInterest(_nftIndex) >=
-            getLiquidationLimit(_nftIndex);
+            getLiquidationLimit(positionOwner[_nftIndex], _nftIndex);
     }
 
     /// @param _nftIndex The NFT to check
@@ -729,41 +681,27 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @dev Returns the credit limit of an NFT
+    /// @param _owner The owner of the NFT
     /// @param _nftIndex The NFT to return credit limit of
     /// @return The NFT credit limit
-    function _getCreditLimit(address user, uint256 _nftIndex)
+    function _getCreditLimit(address _owner, uint256 _nftIndex)
         internal
         view
         returns (uint256)
     {
-        uint256 value = getNFTValueETH(_nftIndex);
-        if (cigStaking.isUserStaking(user)) {
-            return
-                (value * settings.cigStakedCreditLimitRate.numerator) /
-                settings.cigStakedCreditLimitRate.denominator;
-        }
-        return
-            (value * settings.creditLimitRate.numerator) /
-            settings.creditLimitRate.denominator;
+        return nftValueProvider.getCreditLimitETH(_owner, _nftIndex);
     }
 
     /// @dev Returns the minimum amount of debt necessary to liquidate an NFT
+    /// @param _owner The owner of the NFT
     /// @param _nftIndex The index of the NFT
     /// @return The minimum amount of debt to liquidate the NFT
-    function _getLiquidationLimit(address user, uint256 _nftIndex)
+    function _getLiquidationLimit(address _owner, uint256 _nftIndex)
         internal
         view
         returns (uint256)
     {
-        uint256 value = getNFTValueETH(_nftIndex);
-        if (cigStaking.isUserStaking(user)) {
-            return
-                (value * settings.cigStakedLiquidationLimitRate.numerator) /
-                settings.cigStakedLiquidationLimitRate.denominator;
-        }
-        return
-            (value * settings.liquidationLimitRate.numerator) /
-            settings.liquidationLimitRate.denominator;
+        return nftValueProvider.getLiquidationLimitETH(_owner, _nftIndex);
     }
 
     /// @dev Calculates current outstanding debt of an NFT
@@ -817,16 +755,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             (elapsedTime * totalDebt * settings.debtInterestApr.numerator) /
             settings.debtInterestApr.denominator /
             365 days;
-    }
-
-    /// @dev Checks if `r1` is greater than `r2`.
-    function _greaterThan(Rate memory _r1, Rate memory _r2)
-        internal
-        pure
-        returns (bool)
-    {
-        return
-            _r1.numerator * _r2.denominator > _r2.numerator * _r1.denominator;
     }
 
     /// @dev Validates a rate. The denominator must be greater than zero and greater than or equal to the numerator.
