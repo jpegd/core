@@ -53,7 +53,6 @@ describe("PETHNFTVault", () => {
 		jpegOracle: UniswapV2MockOracle,
 		floorOracle: MockV3Aggregator,
 		fallbackOracle: MockV3Aggregator,
-		cigStaking: JPEGCardsCigStaking,
 		weth: TestERC20,
 		stablecoin: PETH,
 		erc721: TestERC721,
@@ -70,7 +69,7 @@ describe("PETHNFTVault", () => {
 		await erc721.deployed();
 
 		const CigStaking = await ethers.getContractFactory("JPEGCardsCigStaking");
-		cigStaking = await CigStaking.deploy(erc721.address, [200]);
+		const cigStaking = await CigStaking.deploy(erc721.address, [200]);
 		await cigStaking.deployed();
 
 		const TestERC20 = await ethers.getContractFactory("TestERC20");
@@ -109,7 +108,13 @@ describe("PETHNFTVault", () => {
 		const nftValueProvider = await upgrades.deployProxy(NFTValueProvider, [
 			jpeg.address,
 			jpegOraclesAggregator.address,
+			cigStaking.address,
+			[32, 100],
+			[33, 100],
+			[7, 100],
+			[10, 100],
 			[8, 100],
+			[10, 100],
 			0
 		]);
 
@@ -120,13 +125,12 @@ describe("PETHNFTVault", () => {
 			stablecoin.address,
 			erc721.address,
 			nftValueProvider.address,
-			cigStaking.address,
 			[
 				[2, 100], //debtInterestApr
-				[32, 100], //creditLimitRate
-				[33, 100], //liquidationLimitRate
-				[39, 100], //cigStakedCreditLimitRate
-				[40, 100], //cigStakedLiquidationLimitRate
+				[0, 0], //creditLimitRate - unused
+				[0, 0], //liquidationLimitRate - unused
+				[0, 0], //cigStakedCreditLimitRate - unused
+				[0, 0], //cigStakedLiquidationLimitRate - unused
 				[0, 0], //valueIncreaseLockRate - unused
 				[5, 1000], //organizationFeeRate
 				[1, 100], //insuranchePurchaseRate
@@ -209,62 +213,6 @@ describe("PETHNFTVault", () => {
 		]);
 		expect(await nftVault.totalPositions()).to.equal(1);
 	});
-
-	it("should be able to borrow with cig staked", async () => {
-		await cigStaking.unpause();
-
-		const index = 1000;
-		const borrowAmount = units(1).mul(50).mul(39).div(100);
-		await erc721.mint(user.address, index);
-
-		await erc721.connect(user).approve(nftVault.address, index);
-
-		await expect(
-			nftVault.connect(user).borrow(index, borrowAmount, false)
-		).to.be.revertedWith("InvalidAmount(" + borrowAmount + ")");
-
-		await erc721.mint(user.address, 200);
-		await erc721.connect(user).approve(cigStaking.address, 200);
-		await cigStaking.connect(user).deposit(200);
-
-		await expect(
-			nftVault.connect(user).borrow(index, borrowAmount.mul(2), false)
-		).to.be.revertedWith("InvalidAmount(" + borrowAmount.mul(2) + ")");
-
-		await nftVault.connect(user).borrow(index, borrowAmount, false);
-
-		expect(await stablecoin.balanceOf(user.address)).to.be.equal(
-			borrowAmount.mul(995).div(1000)
-		);
-
-		expect(await nftVault.openPositionsIndexes()).to.deep.equal([
-			BigNumber.from(index),
-		]);
-		expect(await nftVault.totalPositions()).to.equal(1);
-	});
-
-	it("credit limit rate should go back to normal after unstaking cig", async () => {
-		await cigStaking.unpause();
-
-		await erc721.mint(user.address, 200);
-		await erc721.connect(user).approve(cigStaking.address, 200);
-		await cigStaking.connect(user).deposit(200);
-
-		const index = 1000;
-		const borrowAmount = units(1).mul(50).mul(39).div(100);
-		await erc721.mint(user.address, index);
-		await erc721.connect(user).approve(nftVault.address, index);
-		await nftVault.connect(user).borrow(index, borrowAmount, false);
-
-		expect(await nftVault.isLiquidatable(index)).to.be.false;
-		expect(await nftVault.getCreditLimit(index)).to.equal(borrowAmount);
-
-		await cigStaking.connect(user).withdraw(200);
-
-		expect(await nftVault.isLiquidatable(index)).to.be.true;
-		expect(await nftVault.getCreditLimit(index)).to.equal(units(1).mul(50).mul(32).div(100));
-	});
-
 
 	it("should be able to borrow with insurance", async () => {
 		const index = 2000;
@@ -501,58 +449,6 @@ describe("PETHNFTVault", () => {
 			BigNumber.from(index),
 		]);
 		expect(await nftVault.totalPositions()).to.equal(1);
-	});
-
-	it("should be able to liquidate borrow position with staked cig", async () => {
-		await cigStaking.unpause();
-
-		await erc721.mint(user.address, 200);
-		await erc721.connect(user).approve(cigStaking.address, 200);
-		await cigStaking.connect(user).deposit(200);
-
-		const index = 1000;
-		const borrowAmount = units(1).mul(50).mul(39).div(100);
-		await erc721.mint(user.address, index);
-		await erc721.connect(user).approve(nftVault.address, index);
-		await nftVault.connect(user).borrow(index, borrowAmount, false);
-
-		await expect(nftVault.connect(user).liquidate(10001, owner.address)).to.be.revertedWith(
-			"AccessControl: account " +
-			user.address.toLowerCase() +
-			" is missing role " +
-			liquidator_role
-		);
-
-		await expect(nftVault.connect(dao).liquidate(10001, owner.address)).to.be.revertedWith(
-			"InvalidNFT(10001)"
-		);
-
-		await expect(nftVault.connect(dao).liquidate(index, owner.address)).to.be.revertedWith(
-			"InvalidPosition(" + index + ")"
-		);
-
-		const liquidationCost = borrowAmount.add(units(1));
-		await weth.mint(dao.address, liquidationCost);
-		await weth.connect(dao).approve(ethVault.address, liquidationCost);
-		await ethVault.connect(dao).deposit(liquidationCost);
-		await ethVault.connect(dao).borrow(liquidationCost);
-
-		await floorOracle.updateAnswer(units(10));
-		expect(await nftVault.isLiquidatable(index)).to.be.true;
-
-		await stablecoin.connect(dao).approve(nftVault.address, liquidationCost);
-		await nftVault.connect(dao).liquidate(index, owner.address);
-
-		expect(await stablecoin.balanceOf(dao.address)).to.be.gt(0);
-
-		expect(await erc721.ownerOf(index)).to.be.equal(owner.address);
-
-		expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
-
-		await floorOracle.updateAnswer(units(50));
-
-		expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
-		expect(await nftVault.totalPositions()).to.equal(0);
 	});
 
 	it("shouldn't allow closing liquidated positions with insurance without repaying", async () => {

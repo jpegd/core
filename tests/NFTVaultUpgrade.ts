@@ -9,7 +9,6 @@ import { ethers, network, upgrades } from "hardhat";
 import hre from "hardhat";
 
 import {
-    JPEGCardsCigStaking,
     NFTVault,
     StableCoin,
     IAggregatorV3Interface,
@@ -44,7 +43,6 @@ describe("NFTVaultUpgrade", () => {
         floorOracle: IAggregatorV3Interface,
         nftValueProvider: NFTValueProvider,
         cards: ERC721,
-        cigStaking: JPEGCardsCigStaking,
         stablecoin: StableCoin,
         data: any;
 
@@ -78,6 +76,10 @@ describe("NFTVaultUpgrade", () => {
             method: "hardhat_impersonateAccount",
             params: ["0x21f73D42Eb58Ba49dDB685dc29D3bF5c0f0373CA"],
         });
+
+        const legacyDao = dao = ethers.provider.getSigner(
+            "0xa80c3BC69a0b69a62E777a8ADA1E8807fF878a59"
+        );
 
         dao = ethers.provider.getSigner(
             "0x51C2cEF9efa48e08557A361B52DB34061c025a1B"
@@ -115,10 +117,15 @@ describe("NFTVaultUpgrade", () => {
             value: ethers.utils.parseEther("1")
         });
 
+        await owner.sendTransaction({
+            to: legacyDao._address,
+            value: ethers.utils.parseEther("1")
+        });
+
         bayc = IERC721__factory.connect("0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", ethers.provider);
 
         const CigStaking = await ethers.getContractFactory("JPEGCardsCigStaking");
-        cigStaking = CigStaking.attach("0xff9233825542977cd093e9ffb8f0fc526164d3b7");
+        const cigStaking = CigStaking.attach("0xff9233825542977cd093e9ffb8f0fc526164d3b7");
 
         const Cards = await ethers.getContractFactory("ERC721");
         cards = Cards.attach("0x83979584ec8c6d94d93f838a524049173deba6f4")
@@ -127,22 +134,37 @@ describe("NFTVaultUpgrade", () => {
 
         const StableCoin = await ethers.getContractFactory("StableCoin");
         stablecoin = StableCoin.attach("0x466a756e9a7401b5e2444a3fcb3c2c12fbea0a54");
-
+        
         ethOracle = IAggregatorV3Interface__factory.connect("0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", ethers.provider);
-
         floorOracle = IAggregatorV3Interface__factory.connect("0x0CA05B24795eb4f5bA5237e1D4470048cc0fE235", ethers.provider);
 
-        const NFTVault = await ethers.getContractFactory("NFTVault");
-        nftVault = NFTVault.attach("0x271c7603AAf2BD8F68e8Ca60f4A4F22c4920259f");
+        const NFTValueProvider = await ethers.getContractFactory("NFTValueProvider");
+        nftValueProvider = NFTValueProvider.attach("0x5b9cAA47A52e4BfbBce2f2A9f858c2A501B48C42");
 
-        const newImpl = (await upgrades.prepareUpgrade("0x271c7603AAf2BD8F68e8Ca60f4A4F22c4920259f", NFTVault)).toString();
+        const providerImpl = (await upgrades.prepareUpgrade(nftValueProvider.address, NFTValueProvider)).toString();
 
         const ProxyAdmin = await getProxyAdminFactory(hre);
         const proxyAdmin = ProxyAdmin.attach("0x4156d093F5e6D649fCDccdBAB733782b726b13d7");
 
+        await proxyAdmin.connect(dao).upgradeAndCall(
+            nftValueProvider.address, 
+            providerImpl, 
+            (await nftValueProvider.populateTransaction.finalizeUpgrade(
+                cigStaking.address, 
+                {numerator: 35, denominator: 100},
+                {numerator: 36, denominator: 100},
+                {numerator: 10, denominator: 100},
+                {numerator: 15, denominator: 100},
+                {numerator: 10, denominator: 100},
+            )).data);
+
+        const NFTVault = await ethers.getContractFactory("NFTVault");
+        nftVault = NFTVault.attach("0x271c7603AAf2BD8F68e8Ca60f4A4F22c4920259f");
+
+        const newImpl = (await upgrades.prepareUpgrade(nftVault.address, NFTVault)).toString();
+
         data = {
             nftValueProvider: await nftVault.nftValueProvider(),
-            cigStaking: await nftVault.cigStaking(),
             ethAggregator: await nftVault.ethAggregator(),
             nftContract: await nftVault.nftContract(),
             openPositionsIndexes: await nftVault.openPositionsIndexes(),
@@ -154,18 +176,15 @@ describe("NFTVaultUpgrade", () => {
             totalPositions: await nftVault.totalPositions(),
         }
 
-        const NFTValueProvider = await ethers.getContractFactory("NFTValueProvider");
-        nftValueProvider = NFTValueProvider.attach(data.nftValueProvider);
-
         await proxyAdmin.connect(dao).upgrade(nftVault.address, newImpl);
 
         await bayc.connect(user).setApprovalForAll(nftVault.address, true);
     });
 
     it("should have upgraded correctly", async () => {
+
         const upgradeData = {
             nftValueProvider: await nftVault.nftValueProvider(),
-            cigStaking: await nftVault.cigStaking(),
             ethAggregator: await nftVault.ethAggregator(),
             nftContract: await nftVault.nftContract(),
             openPositionsIndexes: await nftVault.openPositionsIndexes(),
@@ -198,7 +217,6 @@ describe("NFTVaultUpgrade", () => {
         const { answer: floorETH } = await floorOracle.latestRoundData();
         const { answer: ethPrice } = await ethOracle.latestRoundData();
         const decimals = await ethOracle.decimals();
-
         const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(35).div(100);
 
         await expect(
@@ -216,67 +234,9 @@ describe("NFTVaultUpgrade", () => {
         expect(await nftVault.openPositionsIndexes()).to.deep.include.members([BigNumber.from(index.toString())]);
         expect(await nftVault.totalPositions()).to.equal(positionsBefore.add(1));
 
-        expect(await nftVault.getCreditLimit(index)).to.equal(borrowAmount);
+        expect(await nftVault.getCreditLimit(user._address, index)).to.equal(borrowAmount);
         expect((await nftVault.positions(index)).debtPrincipal).to.equal(borrowAmount.div(4).mul(2));
     });
-
-    it("should be able to borrow with cig staked", async () => {
-        const index = 860;
-        const { answer: floorETH } = await floorOracle.latestRoundData();
-        const { answer: ethPrice } = await ethOracle.latestRoundData();
-        const decimals = await ethOracle.decimals();
-
-        const positionsBefore = await nftVault.totalPositions();
-        const stablecoinBalanceBefore = await stablecoin.balanceOf(user._address);
-
-        const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(45).div(100);
-
-        await expect(
-            nftVault.connect(user).borrow(index, borrowAmount, false)
-        ).to.be.revertedWith("InvalidAmount(" + borrowAmount + ")");
-
-        await cards.connect(user).approve(cigStaking.address, 172);
-        await cigStaking.connect(user).deposit(172);
-
-        await expect(
-            nftVault.connect(user).borrow(index, borrowAmount.mul(2), false)
-        ).to.be.revertedWith("InvalidAmount(" + borrowAmount.mul(2) + ")");
-
-        await nftVault.connect(user).borrow(index, borrowAmount, false);
-
-        expect(await stablecoin.balanceOf(user._address)).to.be.closeTo(
-            borrowAmount.add(stablecoinBalanceBefore), 2
-        );
-
-        expect(await nftVault.openPositionsIndexes()).to.deep.include.members([
-            BigNumber.from(index),
-        ]);
-        expect(await nftVault.totalPositions()).to.equal(positionsBefore.add(1));
-
-        await cigStaking.connect(user).withdraw(172);
-    });
-
-    it("credit limit rate should go back to normal after unstaking cig", async () => {
-        await cards.connect(user).approve(cigStaking.address, 172);
-        await cigStaking.connect(user).deposit(172);
-
-        const index = 971;
-        const { answer: floorETH } = await floorOracle.latestRoundData();
-        const { answer: ethPrice } = await ethOracle.latestRoundData();
-        const decimals = await ethOracle.decimals();
-
-        const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(45).div(100);
-        await nftVault.connect(user).borrow(index, borrowAmount, false);
-
-        expect(await nftVault.isLiquidatable(index)).to.be.false;
-        expect(await nftVault.getCreditLimit(index)).to.equal(borrowAmount);
-
-        await cigStaking.connect(user).withdraw(172);
-
-        expect(await nftVault.isLiquidatable(index)).to.be.true;
-        expect(await nftVault.getCreditLimit(index)).to.equal(floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(35).div(100));
-    });
-
 
     it("should be able to borrow with insurance", async () => {
         const index = 972;
@@ -422,7 +382,7 @@ describe("NFTVaultUpgrade", () => {
             "ERC20: insufficient allowance"
         );
 
-        await stablecoin.connect(liquidator).approve(nftVault.address, units(50000));
+        await stablecoin.connect(liquidator).approve(nftVault.address, borrowAmount.mul(2));
         await nftVault.connect(liquidator).liquidate(index, owner.address);
 
         expect(await bayc.ownerOf(index)).to.be.equal(owner.address);
@@ -434,12 +394,16 @@ describe("NFTVaultUpgrade", () => {
 
     it("should be able to liquidate borrow position with insurance", async () => {
         const index = 976;
-        const borrowAmount = units(2000);
+        const { answer: floorETH } = await floorOracle.latestRoundData();
+        const { answer: ethPrice } = await ethOracle.latestRoundData();
+        const decimals = await ethOracle.decimals();
+
+        const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(35).div(100);
         await nftVault.connect(user).borrow(index, borrowAmount, true);
 
         await nftValueProvider.connect(dao).overrideFloor(units(1));
 
-        await stablecoin.connect(liquidator).approve(nftVault.address, units(30000));
+        await stablecoin.connect(liquidator).approve(nftVault.address, borrowAmount.mul(2));
         await nftVault.connect(liquidator).liquidate(index, owner.address);
 
         await expect(nftVault.connect(liquidator).liquidate(index, owner.address)).to.be.revertedWith(
@@ -459,49 +423,6 @@ describe("NFTVaultUpgrade", () => {
         await nftValueProvider.connect(dao).disableFloorOverride();
     });
 
-    it("should be able to liquidate borrow position with staked cig", async () => {
-        await cards.connect(user).approve(cigStaking.address, 172);
-        await cigStaking.connect(user).deposit(172);
-
-        const index = 977;
-
-        const { answer: floorETH } = await floorOracle.latestRoundData();
-        const { answer: ethPrice } = await ethOracle.latestRoundData();
-        const decimals = await ethOracle.decimals();
-        const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(45).div(100);
-
-        await nftVault.connect(user).borrow(index, borrowAmount, false);
-
-        await expect(nftVault.connect(user).liquidate(10001, owner.address)).to.be.revertedWith(
-            "AccessControl: account " +
-            user._address.toLowerCase() +
-            " is missing role " +
-            liquidator_role
-        );
-
-        await expect(nftVault.connect(liquidator).liquidate(10001, owner.address)).to.be.revertedWith(
-            "ERC721: owner query for nonexistent token"
-        );
-
-        await expect(nftVault.connect(liquidator).liquidate(index, owner.address)).to.be.revertedWith(
-            "InvalidPosition(" + index + ")"
-        );
-
-        const liquidationCost = borrowAmount.add(units(1));
-
-        await nftValueProvider.connect(dao).overrideFloor(units(10));
-        expect(await nftVault.isLiquidatable(index)).to.be.equal(true);
-
-        await stablecoin.connect(liquidator).approve(nftVault.address, liquidationCost);
-        await nftVault.connect(liquidator).liquidate(index, owner.address);
-
-        expect(await bayc.ownerOf(index)).to.be.equal(owner.address);
-
-        expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
-
-        await nftValueProvider.connect(dao).disableFloorOverride();
-    });
-
     it("shouldn't allow closing liquidated positions with insurance without repaying", async () => {
         const index = 978;
 
@@ -513,7 +434,7 @@ describe("NFTVaultUpgrade", () => {
 
         await nftValueProvider.connect(dao).overrideFloor(units(10));
 
-        await stablecoin.connect(liquidator).approve(nftVault.address, units(50000));
+        await stablecoin.connect(liquidator).approve(nftVault.address, borrowAmount.mul(2));
         await nftVault.connect(liquidator).liquidate(index, owner.address);
 
         await expect(nftVault.connect(user).closePosition(index)).to.be.revertedWith("PositionLiquidated(" + index + ")");
@@ -524,14 +445,14 @@ describe("NFTVaultUpgrade", () => {
     it("should be able to repurchase", async () => {
         await expect(nftVault.repurchase(10001)).to.be.revertedWith("ERC721: owner query for nonexistent token");
         await expect(nftVault.repurchase(1)).to.be.revertedWith("Unauthorized()");
-
+        
         const index = 979;
 
         const { answer: floorETH } = await floorOracle.latestRoundData();
         const { answer: ethPrice } = await ethOracle.latestRoundData();
         const decimals = await ethOracle.decimals();
 
-        const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(10).div(100);
+        const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(35).div(100);
         await nftVault.connect(user).borrow(index, borrowAmount, true);
 
         const initialTimestamp = await currentTimestamp();
@@ -540,7 +461,7 @@ describe("NFTVaultUpgrade", () => {
             "InvalidPosition(" + index + ")"
         );
 
-        await nftValueProvider.connect(dao).overrideFloor(units(1));
+        await nftValueProvider.connect(dao).overrideFloor(units(10));
 
         await stablecoin.connect(liquidator).approve(nftVault.address, units(70000));
         await nftVault.connect(liquidator).liquidate(index, owner.address);
@@ -674,15 +595,5 @@ describe("NFTVaultUpgrade", () => {
         ).to.be.revertedWith("InvalidPosition(" + index + ")");
 
         await nftValueProvider.connect(dao).disableFloorOverride();
-    });
-
-    it("insurance fee is deducted from debt", async () => {
-        const index = 982;
-
-        const balanceBefore = await stablecoin.balanceOf(user._address);
-        await nftVault.connect(user).borrow(index, units(3000).mul(10), true);
-        expect(await stablecoin.balanceOf(user._address)).to.equal(
-            balanceBefore.add(units(3000).mul(10).mul(950).div(1000))
-        );
     });
 });
