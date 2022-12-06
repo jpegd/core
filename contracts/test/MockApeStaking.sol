@@ -8,7 +8,7 @@ import "../interfaces/IApeStaking.sol";
 
 contract MockApeStaking is IApeStaking {
     struct PairingStatus {
-        uint256 tokenId;
+        uint248 tokenId;
         bool isPaired;
     }
 
@@ -55,8 +55,8 @@ contract MockApeStaking is IApeStaking {
     }
 
     function depositBAKC(
-        PairNftWithAmount[] calldata _baycPairs,
-        PairNftWithAmount[] calldata _maycPairs
+        PairNftDepositWithAmount[] calldata _baycPairs,
+        PairNftDepositWithAmount[] calldata _maycPairs
     ) external override {
         _depositPairNft(BAYC_ID, _baycPairs, bayc);
         _depositPairNft(MAYC_ID, _maycPairs, mayc);
@@ -76,7 +76,7 @@ contract MockApeStaking is IApeStaking {
         _withdrawNFT(_nfts, _recipient, MAYC_ID, mayc);
     }
 
-    function withdrawBAKC(PairNftWithAmount[] calldata _baycPairs, PairNftWithAmount[] calldata _maycPairs) external override {
+    function withdrawBAKC(PairNftWithdrawWithAmount[] calldata _baycPairs, PairNftWithdrawWithAmount[] calldata _maycPairs) external override {
         _withdrawPairNft(BAYC_ID, _baycPairs, bayc);
         _withdrawPairNft(MAYC_ID, _maycPairs, mayc);
     }
@@ -118,14 +118,14 @@ contract MockApeStaking is IApeStaking {
 
     function _depositPairNft(
         uint256 _poolId,
-        PairNftWithAmount[] calldata _pairs,
+        PairNftDepositWithAmount[] calldata _pairs,
         IERC721 _contract
     ) internal {
         uint256 totalAmount;
         IERC721 _bakc = bakc;
         uint256 bakcID = BAKC_ID;
         for (uint256 i; i < _pairs.length; ++i) {
-            PairNftWithAmount memory nft = _pairs[i];
+            PairNftDepositWithAmount memory nft = _pairs[i];
             require(_contract.ownerOf(nft.mainTokenId) == msg.sender);
             require(_bakc.ownerOf(nft.bakcTokenId) == msg.sender);
             depositedAmounts[bakcID][nft.bakcTokenId] += nft.amount;
@@ -156,20 +156,27 @@ contract MockApeStaking is IApeStaking {
 
     function _withdrawPairNft(
         uint256 _poolId,
-        PairNftWithAmount[] calldata _pairs,
+        PairNftWithdrawWithAmount[] calldata _pairs,
         IERC721 _contract
     ) internal {
         uint256 totalAmount;
         IERC721 _bakc = bakc;
         uint256 bakcID = BAKC_ID;
         for (uint256 i; i < _pairs.length; ++i) {
-            PairNftWithAmount memory nft = _pairs[i];
+            PairNftWithdrawWithAmount memory nft = _pairs[i];
             require(_contract.ownerOf(nft.mainTokenId) == msg.sender);
             require(_bakc.ownerOf(nft.bakcTokenId) == msg.sender);
-            depositedAmounts[bakcID][nft.bakcTokenId] -= nft.amount;
-            bakcToMain[nft.bakcTokenId][_poolId] = PairingStatus(0, false);
-            mainToBakc[_poolId][nft.mainTokenId] = PairingStatus(0, false);
-            totalAmount += nft.amount;
+            if(!nft.isUncommit) {
+                if(nft.amount == depositedAmounts[bakcID][nft.bakcTokenId]) revert();
+            }
+
+            if (nft.isUncommit) {
+                mainToBakc[_poolId][nft.mainTokenId] = PairingStatus(0, false);
+                bakcToMain[nft.bakcTokenId][_poolId] = PairingStatus(0, false);
+            }
+            uint256 finalWithdrawAmount = nft.isUncommit ? depositedAmounts[bakcID][nft.bakcTokenId]: nft.amount;
+            depositedAmounts[bakcID][nft.bakcTokenId] -= finalWithdrawAmount;
+            totalAmount += finalWithdrawAmount;
         }
 
         ape.transfer(msg.sender, totalAmount);

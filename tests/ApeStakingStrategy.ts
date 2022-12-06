@@ -332,7 +332,7 @@ describe("ApeStakingStrategy", () => {
 
         await strategy.connect(user).stakeTokensBAKC(nftAmounts);
         
-        await strategy.connect(user).withdrawTokensBAKC([nftAmounts[0]], user.address);
+        await strategy.connect(user).withdrawTokensBAKC([{isUncommit: true, ...nftAmounts[0]}], user.address);
 
         expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.mul(2).sub(nftAmounts[0].amount));
         expect(await ape.balanceOf(user.address)).to.equal(nftAmounts[0].amount);

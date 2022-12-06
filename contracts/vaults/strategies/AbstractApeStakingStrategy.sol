@@ -117,8 +117,8 @@ abstract contract AbstractApeStakingStrategy is
             uint256 amount = amounts[i];
             totalAmount += amount;
             nfts[i] = IApeStaking.SingleNft({
-                tokenId: _nftIndexes[i],
-                amount: amount
+                tokenId: uint32(_nftIndexes[i]),
+                amount: uint224(amount)
             });
         }
 
@@ -177,8 +177,8 @@ abstract contract AbstractApeStakingStrategy is
                 IApeStaking.SingleNft[]
                     memory nfts = new IApeStaking.SingleNft[](1);
                 nfts[0] = IApeStaking.SingleNft({
-                    tokenId: _nftIndex,
-                    amount: stakedAmount
+                    tokenId: uint32(_nftIndex),
+                    amount: uint224(stakedAmount)
                 });
 
                 ISimpleUserProxy(clone).doCall(
@@ -199,12 +199,14 @@ abstract contract AbstractApeStakingStrategy is
                         bakcPoolId,
                         bakcIndex
                     );
-                    IApeStaking.PairNftWithAmount[]
-                        memory nfts = new IApeStaking.PairNftWithAmount[](1);
-                    nfts[0] = IApeStaking.PairNftWithAmount({
-                        mainTokenId: _nftIndex,
-                        bakcTokenId: bakcIndex,
-                        amount: stakedAmount
+                    IApeStaking.PairNftWithdrawWithAmount[]
+                        memory nfts = new IApeStaking.PairNftWithdrawWithAmount[](1);
+                    nfts[0] = IApeStaking.PairNftWithdrawWithAmount({
+                        mainTokenId: uint32(_nftIndex),
+                        bakcTokenId: uint32(bakcIndex),
+                        amount: uint184(stakedAmount),
+                        isUncommit: true
+
                     });
                     ISimpleUserProxy(clone).doCall(
                         address(_apeStaking),
@@ -271,7 +273,7 @@ abstract contract AbstractApeStakingStrategy is
     /// @notice Allows users to pair their committed NFTs with BAKCs in the BAKC pool and increase their APE stake.
     /// Automatically commits the BAKCs specified in `_nfts` if they aren't already
     /// @param _nfts NFT IDs, BAKC IDs and token amounts to deposit
-    function stakeTokensBAKC(IApeStaking.PairNftWithAmount[] calldata _nfts)
+    function stakeTokensBAKC(IApeStaking.PairNftDepositWithAmount[] calldata _nfts)
         external
     {
         uint256 length = _nfts.length;
@@ -282,7 +284,7 @@ abstract contract AbstractApeStakingStrategy is
         uint256 totalAmount;
         IERC721Upgradeable bakc = bakcContract;
         for (uint256 i; i < length; i++) {
-            IApeStaking.PairNftWithAmount memory pair = _nfts[i];
+            IApeStaking.PairNftDepositWithAmount memory pair = _nfts[i];
 
             if (bakc.ownerOf(pair.bakcTokenId) != clone)
                 bakc.transferFrom(msg.sender, clone, pair.bakcTokenId);
@@ -321,7 +323,7 @@ abstract contract AbstractApeStakingStrategy is
     /// @param _nfts NFT IDs, BAKC IDs and token amounts to withdraw
     /// @param _recipient The Address to send the tokens to
     function withdrawTokensBAKC(
-        IApeStaking.PairNftWithAmount[] calldata _nfts,
+        IApeStaking.PairNftWithdrawWithAmount[] calldata _nfts,
         address _recipient
     ) external {
         uint256 length = _nfts.length;
@@ -359,18 +361,17 @@ abstract contract AbstractApeStakingStrategy is
         address _bakcContract = address(bakcContract);
 
         uint256 _mainPoolId = mainPoolId;
-        uint256 _bakcPoolId = bakcPoolId;
         for (uint256 i; i < length; ++i) {
             uint256 index = _nfts[i];
 
             (uint256 mainIndex, bool isPaired) = _apeStaking.bakcToMain(_nfts[i], _mainPoolId);
             if (isPaired) {
-                (uint256 stakedAmount, ) = _apeStaking.nftPosition(_bakcPoolId, index);
-                IApeStaking.PairNftWithAmount[] memory pairs = new IApeStaking.PairNftWithAmount[](1);
-                pairs[0] = IApeStaking.PairNftWithAmount({
-                    mainTokenId: mainIndex,
-                    bakcTokenId: index,
-                    amount: stakedAmount
+                IApeStaking.PairNftWithdrawWithAmount[] memory pairs = new IApeStaking.PairNftWithdrawWithAmount[](1);
+                pairs[0] = IApeStaking.PairNftWithdrawWithAmount({
+                    mainTokenId: uint32(mainIndex),
+                    bakcTokenId: uint32(index),
+                    amount: 0, //isUncommit set to true sends back the whole staked amount
+                    isUncommit: true
                 });
 
                 ISimpleUserProxy(clone).doCall(
@@ -452,10 +453,10 @@ abstract contract AbstractApeStakingStrategy is
     function _claimSelector() internal view virtual returns (bytes4);
 
     function _depositBAKCCalldata(
-        IApeStaking.PairNftWithAmount[] calldata _nfts
+        IApeStaking.PairNftDepositWithAmount[] calldata _nfts
     ) internal view virtual returns (bytes memory);
 
-    function _withdrawBAKCCalldata(IApeStaking.PairNftWithAmount[] memory _nfts)
+    function _withdrawBAKCCalldata(IApeStaking.PairNftWithdrawWithAmount[] memory _nfts)
         internal
         view
         virtual
