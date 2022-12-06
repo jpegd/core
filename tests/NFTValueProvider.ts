@@ -100,7 +100,6 @@ describe("NFTValueProvider", () => {
 		expect(await nftValueProvider.nftTypes(0)).to.equal(apeHash);
 	});
 
-
 	it("should return the correct credit and liquidation limits", async () => {
 		expect(await nftValueProvider.getCreditLimitETH(owner.address, 0)).to.equal(units(50 * 32 / 100));
 		expect(await nftValueProvider.getLiquidationLimitETH(owner.address, 0)).to.equal(units(50 * 33 / 100));
@@ -150,12 +149,10 @@ describe("NFTValueProvider", () => {
 
 		await nftValueProvider.connect(user).applyTraitBoost(indexes, [0, 0, 0].map(() => timestamp + 1000));
 
-
 		expect(await nftValueProvider.getNFTValueETH(indexes[0])).to.equal(units(500));
 
 		expect(await jpeg.balanceOf(user.address)).to.equal(0);
 		expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(units(36000 * 3));
-
 
 		await expect(nftValueProvider.withdrawTraitBoost(indexes)).to.be.revertedWith("Unauthorized()");
 		await expect(nftValueProvider.connect(user).withdrawTraitBoost(indexes)).to.be.revertedWith("Unauthorized()");
@@ -166,7 +163,6 @@ describe("NFTValueProvider", () => {
 		expect(await nftValueProvider.getNFTValueETH(indexes[0])).to.equal(units(50));
 		expect(await nftValueProvider.getNFTValueETH(indexes[1])).to.equal(units(50));
 		expect(await nftValueProvider.getNFTValueETH(indexes[2])).to.equal(units(50));
-
 
 		await nftValueProvider.connect(user).withdrawTraitBoost(indexes.slice(1));
 

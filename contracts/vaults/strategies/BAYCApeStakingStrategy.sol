@@ -17,17 +17,17 @@ contract BAYCApeStakingStrategy is AbstractApeStakingStrategy {
     }
 
     function _depositBAKCCalldata(
-        IApeStaking.PairNftWithAmount[] calldata _nfts
+        IApeStaking.PairNftDepositWithAmount[] calldata _nfts
     ) internal pure override returns (bytes memory) {
         return
             abi.encodeWithSelector(
                 IApeStaking.depositBAKC.selector,
                 _nfts,
-                new IApeStaking.PairNftWithAmount[](0)
+                new IApeStaking.PairNftDepositWithAmount[](0)
             );
     }
 
-    function _withdrawBAKCCalldata(IApeStaking.PairNftWithAmount[] memory _nfts)
+    function _withdrawBAKCCalldata(IApeStaking.PairNftWithdrawWithAmount[] memory _nfts)
         internal
         pure
         override
@@ -37,7 +37,7 @@ contract BAYCApeStakingStrategy is AbstractApeStakingStrategy {
             abi.encodeWithSelector(
                 IApeStaking.withdrawBAKC.selector,
                 _nfts,
-                new IApeStaking.PairNftWithAmount[](0)
+                new IApeStaking.PairNftWithdrawWithAmount[](0)
             );
     }
 
@@ -49,7 +49,7 @@ contract BAYCApeStakingStrategy is AbstractApeStakingStrategy {
             abi.encodeWithSelector(
                 IApeStaking.claimBAKC.selector,
                 _nfts,
-                new IApeStaking.PairNftWithAmount[](0),
+                new IApeStaking.PairNft[](0),
                 _recipient
             );
     }

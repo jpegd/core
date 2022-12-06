@@ -18,17 +18,17 @@ contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
     }
 
     function _depositBAKCCalldata(
-        IApeStaking.PairNftWithAmount[] calldata _nfts
+        IApeStaking.PairNftDepositWithAmount[] calldata _nfts
     ) internal pure override returns (bytes memory) {
         return
             abi.encodeWithSelector(
                 IApeStaking.depositBAKC.selector,
-                new IApeStaking.PairNftWithAmount[](0),
+                new IApeStaking.PairNftDepositWithAmount[](0),
                 _nfts
             );
     }
 
-    function _withdrawBAKCCalldata(IApeStaking.PairNftWithAmount[] memory _nfts)
+    function _withdrawBAKCCalldata(IApeStaking.PairNftWithdrawWithAmount[] memory _nfts)
         internal
         pure
         override
@@ -37,7 +37,7 @@ contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
         return
             abi.encodeWithSelector(
                 IApeStaking.withdrawBAKC.selector,
-                new IApeStaking.PairNftWithAmount[](0),
+                new IApeStaking.PairNftWithdrawWithAmount[](0),
                 _nfts
             );
     }
@@ -49,7 +49,7 @@ contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
         return
             abi.encodeWithSelector(
                 IApeStaking.claimBAKC.selector,
-                new IApeStaking.PairNftWithAmount[](0),
+                new IApeStaking.PairNft[](0),
                 _nfts,
                 _recipient
             );
