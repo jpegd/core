@@ -6,15 +6,15 @@ import "./AbstractApeStakingStrategy.sol";
 contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
     
     function _depositSelector() internal override pure returns (bytes4) {
-        return IApeStaking.depositBAYC.selector;
+        return IApeStaking.depositMAYC.selector;
     }
 
     function _withdrawSelector() internal override pure returns (bytes4) {
-        return IApeStaking.withdrawBAYC.selector;
+        return IApeStaking.withdrawMAYC.selector;
     }
 
     function _claimSelector() internal override pure returns (bytes4) {
-        return IApeStaking.claimBAYC.selector;
+        return IApeStaking.claimMAYC.selector;
     }
 
     function _depositBAKCCalldata(
