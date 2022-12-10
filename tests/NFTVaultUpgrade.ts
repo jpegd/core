@@ -138,25 +138,10 @@ describe("NFTVaultUpgrade", () => {
         ethOracle = IAggregatorV3Interface__factory.connect("0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", ethers.provider);
         floorOracle = IAggregatorV3Interface__factory.connect("0x0CA05B24795eb4f5bA5237e1D4470048cc0fE235", ethers.provider);
 
-        const NFTValueProvider = await ethers.getContractFactory("NFTValueProvider");
-        nftValueProvider = NFTValueProvider.attach("0x5b9cAA47A52e4BfbBce2f2A9f858c2A501B48C42");
-
-        const providerImpl = (await upgrades.prepareUpgrade(nftValueProvider.address, NFTValueProvider)).toString();
+        nftValueProvider = <NFTValueProvider>await ethers.getContractAt("NFTValueProvider", "0x5b9cAA47A52e4BfbBce2f2A9f858c2A501B48C42")
 
         const ProxyAdmin = await getProxyAdminFactory(hre);
         const proxyAdmin = ProxyAdmin.attach("0x4156d093F5e6D649fCDccdBAB733782b726b13d7");
-
-        await proxyAdmin.connect(dao).upgradeAndCall(
-            nftValueProvider.address, 
-            providerImpl, 
-            (await nftValueProvider.populateTransaction.finalizeUpgrade(
-                cigStaking.address, 
-                {numerator: 35, denominator: 100},
-                {numerator: 36, denominator: 100},
-                {numerator: 10, denominator: 100},
-                {numerator: 15, denominator: 100},
-                {numerator: 10, denominator: 100},
-            )).data);
 
         const NFTVault = await ethers.getContractFactory("NFTVault");
         nftVault = NFTVault.attach("0x271c7603AAf2BD8F68e8Ca60f4A4F22c4920259f");
@@ -245,7 +230,6 @@ describe("NFTVaultUpgrade", () => {
         const decimals = await ethOracle.decimals();
 
         const borrowAmount = floorETH.mul(ethPrice).div(BigNumber.from(10).pow(decimals)).mul(35).div(100);
-
         await nftVault.connect(dao).collect();
 
         const stablecoinBalanceBefore = await stablecoin.balanceOf(user._address);
@@ -299,10 +283,6 @@ describe("NFTVaultUpgrade", () => {
 
         checkAlmostSame((await nftVault.positions(index)).debtPrincipal, borrowAmount.div(2));
 
-        /*expect(stablecoinBalanceBefore.add(borrowAmount.div(2))).to.be.equal(
-            await stablecoin.balanceOf(user._address)
-        );*/
-
         // pay half again
         await stablecoin
             .connect(user)
@@ -324,7 +304,6 @@ describe("NFTVaultUpgrade", () => {
         await expect(nftVault.closePosition(364)).to.be.revertedWith("Unauthorized()");
 
         const index = 974;
-
         const { answer: floorETH } = await floorOracle.latestRoundData();
         const { answer: ethPrice } = await ethOracle.latestRoundData();
         const decimals = await ethOracle.decimals();
@@ -492,6 +471,60 @@ describe("NFTVaultUpgrade", () => {
 
         await nftValueProvider.connect(dao).disableFloorOverride();
     });
+
+    it("should allow users to deposit NFTs in whitelisted strategies", async () => {
+		const Flash = await ethers.getContractFactory("MockFlashStrategy");
+		const flash = await Flash.deploy(bayc.address);
+		const Standard = await ethers.getContractFactory("MockStandardStrategy")
+		const standard = await Standard.deploy(bayc.address);
+
+		await nftVault.connect(dao).addStrategy(flash.address);
+		await nftVault.connect(dao).addStrategy(standard.address);
+
+		const indexes = [982, 983];
+
+		const borrowAmount = units(30000);
+		await nftVault.connect(user).borrow(indexes[0], borrowAmount, true);
+		await nftVault.connect(user).borrow(indexes[1], borrowAmount, true);
+
+		await flash.shouldSendBack(false);
+		await expect(nftVault.connect(user).depositInStrategy(indexes, 0, "0x")).to.be.revertedWith("InvalidStrategy()");
+		
+		await flash.shouldSendBack(true);
+		await nftVault.connect(user).depositInStrategy(indexes, 0, "0x");
+
+		expect(await bayc.ownerOf(indexes[0])).to.equal(nftVault.address);
+		expect(await bayc.ownerOf(indexes[1])).to.equal(nftVault.address);
+		expect((await nftVault.positions(indexes[0])).strategy).to.equal(ZERO_ADDRESS);
+		expect((await nftVault.positions(indexes[1])).strategy).to.equal(ZERO_ADDRESS);
+
+		await standard.shouldSendBack(false);
+		await nftVault.connect(user).depositInStrategy(indexes, 1, "0x");
+
+		expect(await bayc.ownerOf(indexes[0])).to.equal(standard.address);
+		expect(await bayc.ownerOf(indexes[1])).to.equal(standard.address);
+		expect((await nftVault.positions(indexes[0])).strategy).to.equal(standard.address);
+		expect((await nftVault.positions(indexes[1])).strategy).to.equal(standard.address);
+
+		await expect(nftVault.connect(user).withdrawFromStrategy(indexes)).to.be.revertedWith("InvalidStrategy()");
+		
+		await standard.shouldSendBack(true);
+		await nftVault.connect(user).withdrawFromStrategy(indexes);
+
+		expect(await bayc.ownerOf(indexes[0])).to.equal(nftVault.address);
+		expect(await bayc.ownerOf(indexes[1])).to.equal(nftVault.address);
+		expect((await nftVault.positions(indexes[0])).strategy).to.equal(ZERO_ADDRESS);
+		expect((await nftVault.positions(indexes[1])).strategy).to.equal(ZERO_ADDRESS);
+
+		await nftVault.connect(user).depositInStrategy(indexes, 1, "0x");
+		await stablecoin.connect(user).approve(nftVault.address, borrowAmount.mul(2));
+
+		await nftVault.connect(user).repay(indexes[0], borrowAmount.mul(2));
+		await nftVault.connect(user).closePosition(indexes[0]);
+
+		expect(await bayc.ownerOf(indexes[0])).to.equal(user._address);
+	}); 
+
 
     it("should allow the liquidator to claim an nft with expired insurance", async () => {
         const index = 980;

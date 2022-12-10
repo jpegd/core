@@ -17,7 +17,6 @@ import {
 } from "../types";
 import {
 	units,
-	bn,
 	timeTravel,
 	days,
 	checkAlmostSame,
@@ -522,6 +521,100 @@ describe("PETHNFTVault", () => {
 		expect(
 			await stablecoin.allowance(user.address, nftVault.address)
 		).to.be.closeTo(units(0), units(1) as any);
+
+		expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
+		expect(await nftVault.totalPositions()).to.equal(0);
+	});
+
+	it("should allow users to deposit NFTs in whitelisted strategies", async () => {
+		const Flash = await ethers.getContractFactory("MockFlashStrategy");
+		const flash = await Flash.deploy(erc721.address);
+		const Standard = await ethers.getContractFactory("MockStandardStrategy")
+		const standard = await Standard.deploy(erc721.address);
+
+		await nftVault.connect(dao).addStrategy(flash.address);
+		await nftVault.connect(dao).addStrategy(standard.address);
+
+		const indexes = [100, 200];
+		await erc721.mint(user.address, indexes[0]);
+		await erc721.mint(user.address, indexes[1]);
+
+		await erc721.connect(user).setApprovalForAll(nftVault.address, true);
+		const borrowAmount = units(10);
+		await nftVault.connect(user).borrow(indexes[0], borrowAmount, true);
+		await nftVault.connect(user).borrow(indexes[1], borrowAmount, true);
+
+		await flash.shouldSendBack(false);
+		await expect(nftVault.connect(user).depositInStrategy(indexes, 0, "0x")).to.be.revertedWith("InvalidStrategy()");
+		
+		await flash.shouldSendBack(true);
+		await nftVault.connect(user).depositInStrategy(indexes, 0, "0x");
+
+		expect(await erc721.ownerOf(indexes[0])).to.equal(nftVault.address);
+		expect(await erc721.ownerOf(indexes[1])).to.equal(nftVault.address);
+		expect((await nftVault.positions(indexes[0])).strategy).to.equal(ZERO_ADDRESS);
+		expect((await nftVault.positions(indexes[1])).strategy).to.equal(ZERO_ADDRESS);
+
+		await standard.shouldSendBack(false);
+		await nftVault.connect(user).depositInStrategy(indexes, 1, "0x");
+
+		expect(await erc721.ownerOf(indexes[0])).to.equal(standard.address);
+		expect(await erc721.ownerOf(indexes[1])).to.equal(standard.address);
+		expect((await nftVault.positions(indexes[0])).strategy).to.equal(standard.address);
+		expect((await nftVault.positions(indexes[1])).strategy).to.equal(standard.address);
+
+		await expect(nftVault.connect(user).withdrawFromStrategy(indexes)).to.be.revertedWith("InvalidStrategy()");
+		
+		await standard.shouldSendBack(true);
+		await nftVault.connect(user).withdrawFromStrategy(indexes);
+
+		expect(await erc721.ownerOf(indexes[0])).to.equal(nftVault.address);
+		expect(await erc721.ownerOf(indexes[1])).to.equal(nftVault.address);
+		expect((await nftVault.positions(indexes[0])).strategy).to.equal(ZERO_ADDRESS);
+		expect((await nftVault.positions(indexes[1])).strategy).to.equal(ZERO_ADDRESS);
+
+		await nftVault.connect(user).depositInStrategy(indexes, 1, "0x");
+		await stablecoin.connect(user).approve(nftVault.address, borrowAmount.mul(2));
+
+		await nftVault.connect(user).repay(indexes[0], borrowAmount.mul(2));
+		await nftVault.connect(user).closePosition(indexes[0]);
+
+		expect(await erc721.ownerOf(indexes[0])).to.equal(user.address);
+	}); 
+
+	it("should be able to liquidate borrow position in strategy without insurance", async () => {
+		const Standard = await ethers.getContractFactory("MockStandardStrategy")
+		const standard = await Standard.deploy(erc721.address);
+		await nftVault.connect(dao).addStrategy(standard.address);
+
+		const index = 4000;
+		await erc721.mint(user.address, index);
+
+		await erc721.connect(user).approve(nftVault.address, index);
+
+		const borrowAmount = units(10);
+		await nftVault.connect(user).borrow(index, borrowAmount, false);
+
+		await nftVault.connect(user).depositInStrategy([index], 0, "0x");
+
+		const prepareAmount = units(20);
+		await weth.mint(dao.address, prepareAmount);
+		await weth.connect(dao).approve(ethVault.address, prepareAmount);
+		await ethVault.connect(dao).deposit(prepareAmount);
+		await ethVault.connect(dao).borrow(prepareAmount);;
+
+		expect(await nftVault.isLiquidatable(index)).to.be.false;
+		await floorOracle.updateAnswer(units(10));
+		expect(await nftVault.isLiquidatable(index)).to.be.true;
+
+		await stablecoin.connect(dao).approve(nftVault.address, units(30000));
+		await nftVault.connect(dao).liquidate(index, owner.address);
+
+		expect(await stablecoin.balanceOf(dao.address)).to.be.gt(0);
+
+		expect(await erc721.ownerOf(index)).to.be.equal(owner.address);
+
+		expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
 
 		expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
 		expect(await nftVault.totalPositions()).to.equal(0);
