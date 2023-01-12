@@ -34,6 +34,10 @@ contract MockFlashStrategy is INFTStrategy {
         return address(this);
     }
 
+    function isDeposited(address, uint256) external pure override returns (bool) {
+        revert();
+    }
+
     function kind() external pure override returns (INFTStrategy.Kind) {
         return INFTStrategy.Kind.FLASH;
     }
