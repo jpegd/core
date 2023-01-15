@@ -231,6 +231,16 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         settings = _settings;
     }
 
+    /// @dev Function called by the {ProxyAdmin} contract during the upgrade process.
+    /// Only called on existing vaults where the `initialize` function has already been called.
+    /// It won't be called in new deployments.
+    function finalizeUpgrade()
+        external
+        onlyRole(SETTER_ROLE)
+    {
+        _setRoleAdmin(ROUTER_ROLE, DAO_ROLE);
+    }
+
     /// @notice Returns the number of open positions
     /// @return The number of open positions
     function totalPositions() external view returns (uint256) {
