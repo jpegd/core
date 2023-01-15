@@ -12,4 +12,5 @@ interface INFTStrategy {
     function depositAddress(address _account) external view returns (address);
     function afterDeposit(address _owner, uint256[] calldata _nftIndexes, bytes calldata _data) external;
     function withdraw(address _owner, address _recipient, uint256 _nftIndex) external;
+    function isDeposited(address _owner, uint256 _nftIndex) external view returns (bool);
 }

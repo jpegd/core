@@ -33,4 +33,8 @@ contract MockStandardStrategy is INFTStrategy {
         return INFTStrategy.Kind.STANDARD;
     }
 
+    function isDeposited(address, uint256 _nftIndex) external view override returns (bool) {
+        return nft.ownerOf(_nftIndex) == address(this);
+    }
+
 }

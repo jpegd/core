@@ -48,10 +48,22 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     event Borrowed(
         address indexed owner,
         uint256 indexed index,
-        uint256 amount
+        uint256 amount,
+        bool insured
     );
     event Repaid(address indexed owner, uint256 indexed index, uint256 amount);
-    event PositionClosed(address indexed owner, uint256 indexed index);
+    event PositionClosed(
+        address indexed owner,
+        uint256 indexed index,
+        bool forced
+    );
+    event PositionImported(
+        address indexed owner,
+        uint256 indexed index,
+        uint256 amount,
+        bool insured,
+        address strategy
+    );
     event Liquidated(
         address indexed liquidator,
         address indexed owner,
@@ -113,6 +125,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     bytes32 private constant DAO_ROLE = keccak256("DAO_ROLE");
     bytes32 private constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
     bytes32 private constant SETTER_ROLE = keccak256("SETTER_ROLE");
+    bytes32 private constant ROUTER_ROLE = keccak256("ROUTER_ROLE");
 
     //accrue required
     uint8 private constant ACTION_BORROW = 0;
@@ -206,6 +219,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _setupRole(DAO_ROLE, msg.sender);
         _setRoleAdmin(LIQUIDATOR_ROLE, DAO_ROLE);
         _setRoleAdmin(SETTER_ROLE, DAO_ROLE);
+        _setRoleAdmin(ROUTER_ROLE, DAO_ROLE);
         _setRoleAdmin(DAO_ROLE, DAO_ROLE);
 
         _validateRateBelowOne(_settings.debtInterestApr);
@@ -291,6 +305,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return nftStrategies.values();
     }
 
+    /// @return Whether `_strategy` is a whitelisted strategy.
+    function hasStrategy(address _strategy) external view returns (bool) {
+        return nftStrategies.contains(_strategy);
+    }
+
     /// @dev The {accrue} function updates the contract's state by calculating
     /// the additional interest accrued since the last state update
     function accrue() public {
@@ -302,54 +321,135 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totalFeeCollected += additionalInterest;
     }
 
+    /// @notice Like {doActions} but executed with the specified `_account`.
+    /// Can only be called by the router.
+    function doActionsFor(
+        address _account,
+        uint8[] calldata _actions,
+        bytes[] calldata _data
+    ) external nonReentrant onlyRole(ROUTER_ROLE) {
+        _doActionsFor(_account, _actions, _data);
+    }
+
     /// @notice Allows to execute multiple actions in a single transaction.
     /// @param _actions The actions to execute.
-    /// @param _datas The abi encoded parameters for the actions to execute.
-    function doActions(uint8[] calldata _actions, bytes[] calldata _datas)
+    /// @param _data The abi encoded parameters for the actions to execute.
+    function doActions(uint8[] calldata _actions, bytes[] calldata _data)
         external
         nonReentrant
     {
-        if (_actions.length != _datas.length) revert();
-        bool accrueCalled;
-        for (uint256 i; i < _actions.length; ++i) {
-            uint8 action = _actions[i];
-            if (!accrueCalled && action < 100) {
-                accrue();
-                accrueCalled = true;
-            }
+        _doActionsFor(msg.sender, _actions, _data);
+    }
 
-            if (action == ACTION_BORROW) {
-                (uint256 nftIndex, uint256 amount, bool useInsurance) = abi
-                    .decode(_datas[i], (uint256, uint256, bool));
-                _borrow(nftIndex, amount, useInsurance);
-            } else if (action == ACTION_REPAY) {
-                (uint256 nftIndex, uint256 amount) = abi.decode(
-                    _datas[i],
-                    (uint256, uint256)
-                );
-                _repay(nftIndex, amount);
-            } else if (action == ACTION_CLOSE_POSITION) {
-                uint256 nftIndex = abi.decode(_datas[i], (uint256));
-                _closePosition(nftIndex);
-            } else if (action == ACTION_LIQUIDATE) {
-                (uint256 nftIndex, address recipient) = abi.decode(
-                    _datas[i],
-                    (uint256, address)
-                );
-                _liquidate(nftIndex, recipient);
-            } else if (action == ACTION_REPURCHASE) {
-                uint256 nftIndex = abi.decode(_datas[i], (uint256));
-                _repurchase(nftIndex);
-            } else if (action == ACTION_CLAIM_NFT) {
-                (uint256 nftIndex, address recipient) = abi.decode(
-                    _datas[i],
-                    (uint256, address)
-                );
-                _claimExpiredInsuranceNFT(nftIndex, recipient);
-            } else {
-                revert UnknownAction(action);
-            }
+    /// @notice Allows the router to import a position with the specified parameters without minting any PUSD.
+    /// Used to migrate positions between compatible vaults without having to repay their debt. Credit limit and debt cap still apply.
+    /// @dev This function does some safety checks to make sure the position is valid. These include:
+    /// - Revert if the position at `_nftIndex` already exists
+    /// - Revert if `_strategy` is != `address(0)` but the strategy isn't whitelisted, is not standard or the NFT isn't deposited in it
+    /// - Revert if `_strategy` is == `address(0)` but `nftContract.ownerOf(_nftIndex)` is != `address(0)`
+    /// @param _account The account to open the position for
+    /// @param _nftIndex The index of the NFT to open the position for
+    /// @param _amount The debt of the position
+    /// @param _insurance If the position has insurance
+    /// @param _strategy The strategy the NFT is deposited in
+    function importPosition(
+        address _account,
+        uint256 _nftIndex,
+        uint256 _amount,
+        bool _insurance,
+        address _strategy
+    ) external nonReentrant onlyRole(ROUTER_ROLE) {
+        accrue();
+
+        if (positionOwner[_nftIndex] != address(0)) revert Unauthorized();
+
+        uint256 _totalDebtAmount = totalDebtAmount;
+        if (_totalDebtAmount + _amount > settings.borrowAmountCap)
+            revert DebtCapReached();
+
+        uint256 _creditLimit = _getCreditLimit(_account, _nftIndex);
+        if (_amount > _creditLimit) revert InvalidAmount(_amount);
+
+        Position storage position = positions[_nftIndex];
+
+        if (_strategy != address(0)) {
+            if (
+                !nftStrategies.contains(_strategy) ||
+                INFTStrategy(_strategy).kind() != INFTStrategy.Kind.STANDARD ||
+                !INFTStrategy(_strategy).isDeposited(_account, _nftIndex)
+            ) revert InvalidStrategy();
+
+            position.strategy = INFTStrategy(_strategy);
+        } else if (nftContract.ownerOf(_nftIndex) != address(this))
+            revert Unauthorized();
+
+        position.borrowType = _insurance
+            ? BorrowType.USE_INSURANCE
+            : BorrowType.NON_INSURANCE;
+
+        uint256 _totalDebtPortion = totalDebtPortion;
+        if (_totalDebtPortion == 0) {
+            totalDebtPortion = _amount;
+            position.debtPortion = _amount;
+        } else {
+            uint256 _plusPortion = (_totalDebtPortion * _amount) /
+                _totalDebtAmount;
+            totalDebtPortion = _totalDebtPortion + _plusPortion;
+            position.debtPortion = _plusPortion;
         }
+        position.debtPrincipal = _amount;
+        totalDebtAmount = _totalDebtAmount + _amount;
+
+        positionOwner[_nftIndex] = _account;
+        positionIndexes.add(_nftIndex);
+
+        emit PositionImported(
+            _account,
+            _nftIndex,
+            _amount,
+            _insurance,
+            _strategy
+        );
+    }
+
+    /// @notice Allows the router to forcefully close a position without having to repay its debt.
+    /// Used to migrate positions between compatible vaults without having to repay their debt.
+    /// @dev If `_recipient` equals `position.strategy` the NFT isn't withdrawn. This allows the router
+    /// to migrate NFTs in deposited strategies without withdrawing them.
+    /// @param _account The (expected) owner of the position
+    /// @param _nftIndex The NFT index to close the position for
+    /// @param _recipient The address to send the NFT to
+    function forceClosePosition(
+        address _account,
+        uint256 _nftIndex,
+        address _recipient
+    ) external nonReentrant onlyRole(ROUTER_ROLE) returns (uint256) {
+        accrue();
+
+        if (_account != positionOwner[_nftIndex]) revert Unauthorized();
+
+        Position storage position = positions[_nftIndex];
+        if (position.liquidatedAt > 0) revert PositionLiquidated(_nftIndex);
+
+        uint256 _debtAmount = _getDebtAmount(_nftIndex);
+        if (_debtAmount != 0) {
+            totalDebtPortion -= position.debtPortion;
+            totalDebtAmount -= _debtAmount;
+        }
+
+        INFTStrategy _strategy = position.strategy;
+        positionOwner[_nftIndex] = address(0);
+        delete positions[_nftIndex];
+        positionIndexes.remove(_nftIndex);
+
+        if (address(_strategy) == address(0))
+            nftContract.transferFrom(address(this), _recipient, _nftIndex);
+        else if (address(_strategy) != _recipient)
+            _strategy.withdraw(_account, _recipient, _nftIndex);
+
+        emit PositionClosed(_account, _nftIndex, true);
+
+        return _debtAmount;
     }
 
     /// @notice Allows users to open positions and borrow using an NFT
@@ -365,7 +465,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         bool _useInsurance
     ) external nonReentrant {
         accrue();
-        _borrow(_nftIndex, _amount, _useInsurance);
+        _borrow(msg.sender, _nftIndex, _amount, _useInsurance);
     }
 
     /// @notice Allows users to repay a portion/all of their debt. Note that since interest increases every second,
@@ -376,7 +476,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _amount The amount of debt to repay. If greater than the position's outstanding debt, only the amount necessary to repay all the debt will be taken
     function repay(uint256 _nftIndex, uint256 _amount) external nonReentrant {
         accrue();
-        _repay(_nftIndex, _amount);
+        _repay(msg.sender, _nftIndex, _amount);
     }
 
     /// @notice Allows a user to close a position and get their collateral back, if the position's outstanding debt is 0
@@ -384,7 +484,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @param _nftIndex The index of the NFT used as collateral
     function closePosition(uint256 _nftIndex) external nonReentrant {
         accrue();
-        _closePosition(_nftIndex);
+        _closePosition(msg.sender, _nftIndex);
     }
 
     /// @notice Allows members of the `LIQUIDATOR_ROLE` to liquidate a position. Positions can only be liquidated
@@ -403,7 +503,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         nonReentrant
     {
         accrue();
-        _liquidate(_nftIndex, _recipient);
+        _liquidate(msg.sender, _nftIndex, _recipient);
     }
 
     /// @notice Allows liquidated users who purchased insurance to repurchase their collateral within the time limit
@@ -412,7 +512,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev Emits a {Repurchased} event
     /// @param _nftIndex The NFT to repurchase
     function repurchase(uint256 _nftIndex) external nonReentrant {
-        _repurchase(_nftIndex);
+        _repurchase(msg.sender, _nftIndex);
     }
 
     /// @notice Allows the liquidator who liquidated the insured position with NFT at index `_nftIndex` to claim the position's collateral
@@ -424,7 +524,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         nonReentrant
     {
-        _claimExpiredInsuranceNFT(_nftIndex, _recipient);
+        _claimExpiredInsuranceNFT(msg.sender, _nftIndex, _recipient);
     }
 
     /// @notice Allows borrowers to deposit NFTs to a whitelisted strategy. Strategies may be used to claim airdrops, stake NFTs for rewards and more.
@@ -503,14 +603,64 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit PositionOpened(_owner, _nftIndex);
     }
 
+    /// @dev See {doActions}
+    function _doActionsFor(
+        address _account,
+        uint8[] calldata _actions,
+        bytes[] calldata _data
+    ) internal {
+        if (_actions.length != _data.length) revert InvalidLength();
+        bool accrueCalled;
+        for (uint256 i; i < _actions.length; ++i) {
+            uint8 action = _actions[i];
+            if (!accrueCalled && action < 100) {
+                accrue();
+                accrueCalled = true;
+            }
+
+            if (action == ACTION_BORROW) {
+                (uint256 nftIndex, uint256 amount, bool useInsurance) = abi
+                    .decode(_data[i], (uint256, uint256, bool));
+                _borrow(_account, nftIndex, amount, useInsurance);
+            } else if (action == ACTION_REPAY) {
+                (uint256 nftIndex, uint256 amount) = abi.decode(
+                    _data[i],
+                    (uint256, uint256)
+                );
+                _repay(_account, nftIndex, amount);
+            } else if (action == ACTION_CLOSE_POSITION) {
+                uint256 nftIndex = abi.decode(_data[i], (uint256));
+                _closePosition(_account, nftIndex);
+            } else if (action == ACTION_LIQUIDATE) {
+                (uint256 nftIndex, address recipient) = abi.decode(
+                    _data[i],
+                    (uint256, address)
+                );
+                _liquidate(_account, nftIndex, recipient);
+            } else if (action == ACTION_REPURCHASE) {
+                uint256 nftIndex = abi.decode(_data[i], (uint256));
+                _repurchase(_account, nftIndex);
+            } else if (action == ACTION_CLAIM_NFT) {
+                (uint256 nftIndex, address recipient) = abi.decode(
+                    _data[i],
+                    (uint256, address)
+                );
+                _claimExpiredInsuranceNFT(_account, nftIndex, recipient);
+            } else {
+                revert UnknownAction(action);
+            }
+        }
+    }
+
     /// @dev See {borrow}
     function _borrow(
+        address _account,
         uint256 _nftIndex,
         uint256 _amount,
         bool _useInsurance
     ) internal validNFTIndex(_nftIndex) {
         address owner = positionOwner[_nftIndex];
-        if (owner != msg.sender && owner != address(0)) revert Unauthorized();
+        if (owner != _account && owner != address(0)) revert Unauthorized();
 
         if (_amount == 0) revert InvalidAmount(_amount);
 
@@ -529,7 +679,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             position.borrowType = targetBorrowType;
         else if (borrowType != targetBorrowType) revert InvalidInsuranceMode();
 
-        uint256 creditLimit = _getCreditLimit(msg.sender, _nftIndex);
+        uint256 creditLimit = _getCreditLimit(_account, _nftIndex);
         uint256 debtAmount = _getDebtAmount(_nftIndex);
         if (debtAmount + _amount > creditLimit) revert InvalidAmount(_amount);
 
@@ -561,21 +711,22 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totalDebtAmount += _amount;
 
         if (positionOwner[_nftIndex] == address(0)) {
-            _openPosition(msg.sender, _nftIndex);
+            _openPosition(_account, _nftIndex);
         }
 
         //subtract the fee from the amount borrowed
-        stablecoin.mint(msg.sender, _amount - feeAmount);
+        stablecoin.mint(_account, _amount - feeAmount);
 
-        emit Borrowed(msg.sender, _nftIndex, _amount);
+        emit Borrowed(_account, _nftIndex, _amount, _useInsurance);
     }
 
     /// @dev See {repay}
-    function _repay(uint256 _nftIndex, uint256 _amount)
-        internal
-        validNFTIndex(_nftIndex)
-    {
-        if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
+    function _repay(
+        address _account,
+        uint256 _nftIndex,
+        uint256 _amount
+    ) internal validNFTIndex(_nftIndex) {
+        if (_account != positionOwner[_nftIndex]) revert Unauthorized();
 
         if (_amount == 0) revert InvalidAmount(_amount);
 
@@ -591,7 +742,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _amount = _amount > debtAmount ? debtAmount : _amount;
 
         // burn all payment, the interest is sent to the DAO using the {collect} function
-        stablecoin.burnFrom(msg.sender, _amount);
+        stablecoin.burnFrom(_account, _amount);
 
         uint256 paidPrincipal;
 
@@ -610,15 +761,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         position.debtPrincipal -= paidPrincipal;
         totalDebtAmount = totalDebt - _amount;
 
-        emit Repaid(msg.sender, _nftIndex, _amount);
+        emit Repaid(_account, _nftIndex, _amount);
     }
 
     /// @dev See {closePosition}
-    function _closePosition(uint256 _nftIndex)
+    function _closePosition(address _account, uint256 _nftIndex)
         internal
         validNFTIndex(_nftIndex)
     {
-        if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
+        if (_account != positionOwner[_nftIndex]) revert Unauthorized();
 
         Position storage position = positions[_nftIndex];
         if (position.liquidatedAt > 0) revert PositionLiquidated(_nftIndex);
@@ -632,18 +783,19 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         positionIndexes.remove(_nftIndex);
 
         if (address(strategy) == address(0))
-            nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
-        else strategy.withdraw(msg.sender, msg.sender, _nftIndex);
+            nftContract.safeTransferFrom(address(this), _account, _nftIndex);
+        else strategy.withdraw(_account, _account, _nftIndex);
 
-        emit PositionClosed(msg.sender, _nftIndex);
+        emit PositionClosed(_account, _nftIndex, false);
     }
 
     /// @dev See {liquidate}
-    function _liquidate(uint256 _nftIndex, address _recipient)
-        internal
-        onlyRole(LIQUIDATOR_ROLE)
-        validNFTIndex(_nftIndex)
-    {
+    function _liquidate(
+        address _account,
+        uint256 _nftIndex,
+        address _recipient
+    ) internal validNFTIndex(_nftIndex) {
+        _checkRole(LIQUIDATOR_ROLE, _account);
         address posOwner = positionOwner[_nftIndex];
         if (posOwner == address(0)) revert InvalidPosition(_nftIndex);
 
@@ -655,7 +807,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             revert InvalidPosition(_nftIndex);
 
         // burn all payment
-        stablecoin.burnFrom(msg.sender, debtAmount);
+        stablecoin.burnFrom(_account, debtAmount);
 
         // update debt portion
         totalDebtPortion -= position.debtPortion;
@@ -667,7 +819,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (insured) {
             position.debtAmountForRepurchase = debtAmount;
             position.liquidatedAt = block.timestamp;
-            position.liquidator = msg.sender;
+            position.liquidator = _account;
 
             if (address(strategy) != address(0)) {
                 strategy.withdraw(posOwner, address(this), _nftIndex);
@@ -683,13 +835,16 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             else strategy.withdraw(posOwner, _recipient, _nftIndex);
         }
 
-        emit Liquidated(msg.sender, posOwner, _nftIndex, insured);
+        emit Liquidated(_account, posOwner, _nftIndex, insured);
     }
 
     /// @dev See {repurchase}
-    function _repurchase(uint256 _nftIndex) internal validNFTIndex(_nftIndex) {
+    function _repurchase(address _account, uint256 _nftIndex)
+        internal
+        validNFTIndex(_nftIndex)
+    {
         Position memory position = positions[_nftIndex];
-        if (msg.sender != positionOwner[_nftIndex]) revert Unauthorized();
+        if (_account != positionOwner[_nftIndex]) revert Unauthorized();
         if (position.liquidatedAt == 0) revert InvalidPosition(_nftIndex);
         if (position.borrowType != BorrowType.USE_INSURANCE)
             revert InvalidPosition(_nftIndex);
@@ -710,21 +865,22 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         // transfer payment to liquidator
         stablecoin.safeTransferFrom(
-            msg.sender,
+            _account,
             position.liquidator,
             debtAmount + penalty
         );
 
-        nftContract.safeTransferFrom(address(this), msg.sender, _nftIndex);
+        nftContract.safeTransferFrom(address(this), _account, _nftIndex);
 
-        emit Repurchased(msg.sender, _nftIndex);
+        emit Repurchased(_account, _nftIndex);
     }
 
     /// @dev See {claimExpiredInsuranceNFT}
-    function _claimExpiredInsuranceNFT(uint256 _nftIndex, address _recipient)
-        internal
-        validNFTIndex(_nftIndex)
-    {
+    function _claimExpiredInsuranceNFT(
+        address _account,
+        uint256 _nftIndex,
+        address _recipient
+    ) internal validNFTIndex(_nftIndex) {
         if (_recipient == address(0)) revert ZeroAddress();
         Position memory position = positions[_nftIndex];
         address owner = positionOwner[_nftIndex];
@@ -734,7 +890,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             position.liquidatedAt + settings.insuranceRepurchaseTimeLimit >
             block.timestamp
         ) revert PositionInsuranceNotExpired(_nftIndex);
-        if (position.liquidator != msg.sender) revert Unauthorized();
+        if (position.liquidator != _account) revert Unauthorized();
 
         positionOwner[_nftIndex] = address(0);
         delete positions[_nftIndex];
@@ -769,7 +925,8 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             Position storage position = positions[index];
             if (position.liquidatedAt > 0) revert PositionLiquidated(index);
 
-            if (address(position.strategy) != address(0)) revert InvalidPosition(index);
+            if (address(position.strategy) != address(0))
+                revert InvalidPosition(index);
 
             if (isStandard) position.strategy = strategy;
             nft.transferFrom(address(this), depositAddress, index);
@@ -785,8 +942,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                     revert InvalidStrategy();
             }
         }
-
-
     }
 
     /// @dev See {withdrawFromStrategy}

@@ -47,6 +47,11 @@ contract ClonexEggAirdropClaim is Ownable, INFTStrategy, IERC721Receiver {
         revert NotImplemented();
     }
 
+    /// @dev Not implemented for FLASH strategies
+    function isDeposited(address, uint256) external pure override returns (bool) {
+        revert NotImplemented();
+    }
+
     /// @dev Can only be called by `EGG`.
     /// Transfers `_tokenId` to `currentLoanee`
     function onERC721Received(
