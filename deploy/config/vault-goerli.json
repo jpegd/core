@@ -1,6 +1,6 @@
 {
-    "nft": "0x641f90995C94110A803007225CD7C352e3fc8fBC",
-    "nftValueProvider": "0x460cA887a7a85fB06c3AcCC660FcA7A39B537Cbb",
+    "nft": "0xE7Da122765f6636bFa7e84325Cf021D613868Ac4",
+    "nftValueProvider": "0xd419bf430A446185497331A8364Ef054166caa84",
     "floorOracle": "0x09E4291E18A11892f3baA0d524Cfcd59f1918Ea2",
     "jpegOraclesAggregator": "0x500b19E7951CA36f43c348a55F4f1d6c5D00a614",
     "debtInterestApr": [
@@ -28,8 +28,8 @@
         100
     ],
     "organizationFeeRate": [
-        5,
-        1000
+        0,
+        1
     ],
     "insurancePurchaseRate": [
         5,
@@ -40,5 +40,5 @@
         100
     ],
     "insuranceRepurchaseLimit": 259200,
-    "borrowAmountCap": "1000000000000000000000"
+    "borrowAmountCap": "100000000000000000000"
 }

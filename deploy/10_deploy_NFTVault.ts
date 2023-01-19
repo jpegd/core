@@ -57,7 +57,6 @@ task("deploy-nftVault", "Deploys the NFTVault contract")
 			config.peth,
 			vaultConfig.nft,
 			vaultConfig.nftValueProvider,
-			config.cigStaking,
 			[
 				vaultConfig.debtInterestApr,
 				vaultConfig.creditLimitRate,
@@ -181,18 +180,42 @@ task("deploy-nftprovider", "Deploys the NFTValueProvider contract")
 	})
 
 
-task("deploy-providerImpl", "Upgrades the NFTVault contract")
-.setAction(async ({ }, { network, ethers, run, upgrades }) => {
-	const Provider = await ethers.getContractFactory("NFTValueProvider");
-	const provider = await Provider.deploy()
-	console.log("deploy at: ", provider.address)
-	await provider.deployed()
+task("deploy-providerImpl", "Deploy NFTValueProvider impl")
+	.setAction(async ({ }, { network, ethers, run, upgrades }) => {
+		const Provider = await ethers.getContractFactory("NFTValueProvider");
+		const provider = await Provider.deploy()
+		console.log("deploy at: ", provider.address)
+		await provider.deployed()
 
-	if (network.name != "hardhat") {
-		console.log("Verifying NFTVault");
-		await run("verify:verify", {
-			address: provider.address,
-			constructorArguments: [],
-		});
-	}
-})
+		if (network.name != "hardhat") {
+			console.log("Verifying NFTVault");
+			await run("verify:verify", {
+				address: provider.address,
+				constructorArguments: [],
+			});
+		}
+	})
+
+task("deploy-vaultrouter", "Deploy the JPEGVaultRouter contract")
+	.setAction(async ({ }, { network, ethers, run, upgrades }) => {
+		const JPEGVaultRouter = await ethers.getContractFactory("JPEGVaultRouter");
+		const jpegVaultRouter = await upgrades.deployProxy(JPEGVaultRouter);
+		console.log("deployed at: ", jpegVaultRouter.address)
+		await jpegVaultRouter.deployed()
+
+		const configFilePath = path.join(__dirname, "config", network.name + ".json");
+		const config = await JSON.parse(fs.readFileSync(configFilePath).toString());
+		config.jpegVaultRouter = jpegVaultRouter.address;
+		fs.writeFileSync(configFilePath, JSON.stringify(config));
+
+		if (network.name != "hardhat") {
+			console.log("Verifying jpegVaultRouter");
+
+			const impl = await (await upgrades.admin.getInstance()).getProxyImplementation(config.jpegVaultRouter);
+
+			await run("verify:verify", {
+				address: impl.address,
+				constructorArguments: [],
+			});
+		}
+	})
