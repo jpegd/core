@@ -2,7 +2,7 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { getProxyAdminFactory } from "@openzeppelin/hardhat-upgrades/dist/utils";
 import chai from "chai";
 import { solidity } from "ethereum-waffle";
-import { ethers, network, upgrades } from "hardhat";
+import { ethers, network } from "hardhat";
 import hre from "hardhat";
 import {
   PETHNFTVault,
@@ -15,6 +15,8 @@ import { BigNumber } from "ethers";
 const { expect } = chai;
 
 chai.use(solidity);
+
+const vault_role = "0x31e0210044b4f6757ce6aa31f9c6e8d4896d24a755014887391a926c5224d959";
 
 describe("ClonexEggAirdropClaim", () => {
   let user: SignerWithAddress;
@@ -29,7 +31,7 @@ describe("ClonexEggAirdropClaim", () => {
 
     await network.provider.request({
         method: "hardhat_impersonateAccount",
-        params: ["0x73147F1A2EBCf284b2D0061299bdA8608fe0177F"],
+        params: ["0xC18Fc2e7B2D128FE76B71B4a01f97d4dD949d61c"],
     });
 
     await network.provider.request({
@@ -37,7 +39,7 @@ describe("ClonexEggAirdropClaim", () => {
         params: ["0x51C2cEF9efa48e08557A361B52DB34061c025a1B"],
     });
 
-    user = await ethers.getSigner("0x73147F1A2EBCf284b2D0061299bdA8608fe0177F");
+    user = await ethers.getSigner("0xC18Fc2e7B2D128FE76B71B4a01f97d4dD949d61c");
 
     await owner.sendTransaction({ from: owner.address, to: user.address, value: BigNumber.from(1e18.toString()) })
 
@@ -65,17 +67,16 @@ describe("ClonexEggAirdropClaim", () => {
     const AirdropClaim = await ethers.getContractFactory("ClonexEggAirdropClaim");
     claim = await AirdropClaim.deploy();
 
-    await claim.transferOwnership(clonexVault.address);
+    await claim.grantRole(vault_role, clonexVault.address);
 
     await clonexVault.connect(multisig).addStrategy(claim.address);
   });
 
   it("should allow users to claim Egg NFTs", async () => {
-    await clonexVault.connect(user).depositInStrategy([2817, 17306], 0, "0x")
-    expect(await clonex.ownerOf(2817)).to.equal(clonexVault.address);
-    expect(await clonex.ownerOf(17306)).to.equal(clonexVault.address);
+    await clonexVault.connect(user).depositInStrategy([18370], 1, "0x")
+    expect(await clonex.ownerOf(18370)).to.equal(clonexVault.address);
 
 
-    expect(await egg.balanceOf(user.address)).to.equal(2);
+    expect(await egg.balanceOf(user.address)).to.equal(1);
   });
 });

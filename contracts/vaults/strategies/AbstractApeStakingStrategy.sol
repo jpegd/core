@@ -9,14 +9,14 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "@openzeppelin/contracts-upgradeable/proxy/ClonesUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 
-import "../../interfaces/INFTStrategy.sol";
+import "../../interfaces/IStandardNFTStrategy.sol";
 import "../../interfaces/IApeStaking.sol";
 import "../../interfaces/ISimpleUserProxy.sol";
 
 abstract contract AbstractApeStakingStrategy is
     AccessControlUpgradeable,
     PausableUpgradeable,
-    INFTStrategy
+    IStandardNFTStrategy
 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using AddressUpgradeable for address;
@@ -24,6 +24,7 @@ abstract contract AbstractApeStakingStrategy is
     error ZeroAddress();
     error InvalidLength();
     error Unauthorized();
+    error FlashLoanFailed();
 
     bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
 
@@ -68,8 +69,8 @@ abstract contract AbstractApeStakingStrategy is
         _pause();
     }
 
-    function kind() external pure override returns (INFTStrategy.Kind) {
-        return INFTStrategy.Kind.STANDARD;
+    function kind() external pure override returns (Kind) {
+        return Kind.STANDARD;
     }
 
     /// @return The user proxy address for `_account`
@@ -200,13 +201,14 @@ abstract contract AbstractApeStakingStrategy is
                         bakcIndex
                     );
                     IApeStaking.PairNftWithdrawWithAmount[]
-                        memory nfts = new IApeStaking.PairNftWithdrawWithAmount[](1);
+                        memory nfts = new IApeStaking.PairNftWithdrawWithAmount[](
+                            1
+                        );
                     nfts[0] = IApeStaking.PairNftWithdrawWithAmount({
                         mainTokenId: uint32(_nftIndex),
                         bakcTokenId: uint32(bakcIndex),
                         amount: uint184(stakedAmount),
                         isUncommit: true
-
                     });
                     ISimpleUserProxy(clone).doCall(
                         address(_apeStaking),
@@ -249,6 +251,84 @@ abstract contract AbstractApeStakingStrategy is
         );
     }
 
+    /// @dev Allows the vault to flash loan the NFTs without having to withdraw them from this strategy.
+    /// Useful for claiming airdrops. Can only be called by the vault.
+    /// This function assumes that the vault will also call {flashLoanEnd}.
+    /// It's not an actual flash loan function as it doesn't expect the NFTs to be returned at the end of the call,
+    /// but instead it trusts the vault to do the necessary safety checks.
+    /// @param _owner The owner of the NFTs to flash loan
+    /// @param _recipient The address to send the NFTs to
+    /// @param _nftIndexes The NFTs to send (main collection - BAYC/MAYC)
+    /// @param _additionalData ABI encoded `uint256` array containing the list of BAKC IDs to send 
+    function flashLoanStart(
+        address _owner,
+        address _recipient,
+        uint256[] memory _nftIndexes,
+        bytes calldata _additionalData
+    ) external override onlyRole(VAULT_ROLE) returns (address) {
+        uint256 _length = _nftIndexes.length;
+        if (_length == 0) revert InvalidLength();
+
+        address _clone = _getCloneOrRevert(_owner);
+        address _nftContract = mainNftContract;
+        for (uint256 i; i < _length; ++i) {
+            ISimpleUserProxy(_clone).doCall(
+                _nftContract,
+                abi.encodeWithSelector(
+                    IERC721Upgradeable.transferFrom.selector,
+                    _clone,
+                    _recipient,
+                    _nftIndexes[i]
+                )
+            );
+        }
+
+        //reused to avoid stack too deep
+        _nftIndexes = abi.decode(_additionalData, (uint256[]));
+        _length = _nftIndexes.length;
+
+        if (_length > 0) {
+            _nftContract = address(bakcContract);
+            for (uint256 i; i < _length; ++i) {
+                ISimpleUserProxy(_clone).doCall(
+                    _nftContract,
+                    abi.encodeWithSelector(
+                        IERC721Upgradeable.transferFrom.selector,
+                        _clone,
+                        _recipient,
+                        _nftIndexes[i]
+                    )
+                );
+            }
+        }
+
+        return _clone;
+    }
+
+    /// @dev Flash loan end function. Checks if the BAKCs in `_additionalData` have been returned.
+    /// It doesn't perform any safety checks on the main collection IDs as they are already done by the vault.
+    /// @param _owner The owner of the returned NFTs
+    /// @param _additionalData Array containing the list of BAKC ids returned
+    function flashLoanEnd(
+        address _owner,
+        uint256[] calldata,
+        bytes calldata _additionalData
+    ) external view override onlyRole(VAULT_ROLE) {
+        IERC721Upgradeable _bakcContract = bakcContract;
+        uint256[] memory _bakcIndexes = abi.decode(
+            _additionalData,
+            (uint256[])
+        );
+        uint256 _length = _bakcIndexes.length;
+        if (_length > 0) {
+            address _clone = _getCloneOrRevert(_owner);
+            for (uint256 i; i < _length; ++i) {
+                if (_bakcContract.ownerOf(_bakcIndexes[i]) != _clone)
+                    revert FlashLoanFailed();
+            }
+        }
+    }
+
     /// @notice Allows users to stake additional tokens for NFTs that have already been deposited in the strategy
     /// @param _nfts NFT IDs and token amounts to deposit
     function stakeTokensMain(IApeStaking.SingleNft[] calldata _nfts) external {
@@ -273,9 +353,9 @@ abstract contract AbstractApeStakingStrategy is
     /// @notice Allows users to pair their committed NFTs with BAKCs in the BAKC pool and increase their APE stake.
     /// Automatically commits the BAKCs specified in `_nfts` if they aren't already
     /// @param _nfts NFT IDs, BAKC IDs and token amounts to deposit
-    function stakeTokensBAKC(IApeStaking.PairNftDepositWithAmount[] calldata _nfts)
-        external
-    {
+    function stakeTokensBAKC(
+        IApeStaking.PairNftDepositWithAmount[] calldata _nfts
+    ) external {
         uint256 length = _nfts.length;
         if (length == 0) revert InvalidLength();
 
@@ -364,9 +444,15 @@ abstract contract AbstractApeStakingStrategy is
         for (uint256 i; i < length; ++i) {
             uint256 index = _nfts[i];
 
-            (uint256 mainIndex, bool isPaired) = _apeStaking.bakcToMain(_nfts[i], _mainPoolId);
+            (uint256 mainIndex, bool isPaired) = _apeStaking.bakcToMain(
+                _nfts[i],
+                _mainPoolId
+            );
             if (isPaired) {
-                IApeStaking.PairNftWithdrawWithAmount[] memory pairs = new IApeStaking.PairNftWithdrawWithAmount[](1);
+                IApeStaking.PairNftWithdrawWithAmount[]
+                    memory pairs = new IApeStaking.PairNftWithdrawWithAmount[](
+                        1
+                    );
                 pairs[0] = IApeStaking.PairNftWithdrawWithAmount({
                     mainTokenId: uint32(mainIndex),
                     bakcTokenId: uint32(index),
@@ -456,11 +542,9 @@ abstract contract AbstractApeStakingStrategy is
         IApeStaking.PairNftDepositWithAmount[] calldata _nfts
     ) internal view virtual returns (bytes memory);
 
-    function _withdrawBAKCCalldata(IApeStaking.PairNftWithdrawWithAmount[] memory _nfts)
-        internal
-        view
-        virtual
-        returns (bytes memory);
+    function _withdrawBAKCCalldata(
+        IApeStaking.PairNftWithdrawWithAmount[] memory _nfts
+    ) internal view virtual returns (bytes memory);
 
     function _claimBAKCCalldata(
         IApeStaking.PairNft[] memory _nfts,
