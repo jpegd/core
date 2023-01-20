@@ -485,6 +485,14 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _withdrawFromStrategy(_nftIndexes);
     }
 
+    /// @notice Allows users to use flash strategies with NFTs deposited in standard strategies.
+    /// Useful for claiming airdrops without having to withdraw NFTs.
+    /// All NFTs in `_nftIndexes` must be deposited in the same strategy.
+    /// @param _nftIndexes The list of NFT indexes to send to the flash strategy
+    /// @param _sourceStrategyIndex The strategy the NFTs are deposited into
+    /// @param _flashStrategyIndex The flash strategy to send the NFTs to
+    /// @param _sourceStrategyData Additional data to send to the standard stategy (varies depending on the strategy)
+    /// @param _flashStrategyData Additional data to send to the flash strategy (varies depending on the strategy)
     function flashStrategyFromStandardStrategy(
         uint256[] calldata _nftIndexes,
         uint256 _sourceStrategyIndex,
@@ -866,6 +874,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
+    /// @dev See {flashStrategyFromStandardStrategy}
     function _flashStrategyFromStandardStrategy(
         uint256[] memory _nftIndexes,
         uint256 _sourceStrategyIndex,

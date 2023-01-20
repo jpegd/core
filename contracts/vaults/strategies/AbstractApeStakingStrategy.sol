@@ -251,6 +251,15 @@ abstract contract AbstractApeStakingStrategy is
         );
     }
 
+    /// @dev Allows the vault to flash loan the NFTs without having to withdraw them from this strategy.
+    /// Useful for claiming airdrops. Can only be called by the vault.
+    /// This function assumes that the vault will also call {flashLoanEnd}.
+    /// It's not an actual flash loan function as it doesn't expect the NFTs to be returned at the end of the call,
+    /// but instead it trusts the vault to do the necessary safety checks.
+    /// @param _owner The owner of the NFTs to flash loan
+    /// @param _recipient The address to send the NFTs to
+    /// @param _nftIndexes The NFTs to send (main collection - BAYC/MAYC)
+    /// @param _additionalData ABI encoded `uint256` array containing the list of BAKC IDs to send 
     function flashLoanStart(
         address _owner,
         address _recipient,
@@ -296,6 +305,10 @@ abstract contract AbstractApeStakingStrategy is
         return _clone;
     }
 
+    /// @dev Flash loan end function. Checks if the BAKCs in `_additionalData` have been returned.
+    /// It doesn't perform any safety checks on the main collection IDs as they are already done by the vault.
+    /// @param _owner The owner of the returned NFTs
+    /// @param _additionalData Array containing the list of BAKC ids returned
     function flashLoanEnd(
         address _owner,
         uint256[] calldata,

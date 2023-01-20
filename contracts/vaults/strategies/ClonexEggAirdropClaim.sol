@@ -21,6 +21,10 @@ contract ClonexEggAirdropClaim is AccessControl, IFlashNFTStrategy, IERC721Recei
 
     address private currentLoanee;
 
+    constructor() {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    }
+
     function kind() external pure override returns (Kind) {
         return Kind.FLASH;
     }

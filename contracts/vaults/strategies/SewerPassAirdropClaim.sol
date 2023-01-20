@@ -49,6 +49,10 @@ contract SewerPassAirdropClaim is
 
     address private currentLoanee;
 
+    constructor() {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    }
+
     function kind() external pure override returns (Kind) {
         return Kind.FLASH;
     }
@@ -57,6 +61,11 @@ contract SewerPassAirdropClaim is
         return address(this);
     }
 
+    /// @dev Allows claiming sewer passes. Can only be called by the vault.
+    /// @param _owner The owner of the NFTs and the address to send the sewer pass to
+    /// @param _recipient The address to send the loaned NFTs to (usually the vault or a strategy)
+    /// @param _nftIndexes The NFTs to claim passes with (BAYC/MAYC)
+    /// @param _additionalData ABI encoded data, containing the list of BAKC IDs to use to claim (`BAKCInfo`) and the collection (BAYC/MAYC)
     function afterDeposit(
         address _owner,
         address _recipient,

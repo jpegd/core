@@ -470,4 +470,60 @@ describe("ApeStakingStrategy", () => {
         expect(await ape.balanceOf(user.address)).to.equal(toWithdraw.amount.add(nftAmounts[0].amount).mul(2));
         expect(await ape.balanceOf(apeStaking.address)).to.equal(totalAmount.sub(toWithdraw.amount).sub(nftAmounts[0].amount).mul(2));
     });
+
+    it("should allow the vault to flash loan NFTs", async () => {
+        const nftAmounts = [
+            {mainTokenId: 0, bakcTokenId: 0, amount: units(100)},
+            {mainTokenId: 1, bakcTokenId: 1, amount: units(200)},
+            {mainTokenId: 2, bakcTokenId: 2, amount: units(300)},
+            {mainTokenId: 3, bakcTokenId: 3, amount: units(400)}
+        ];
+
+        const totalAmount = nftAmounts.reduce((s, e) => {
+            return e.amount.add(s);
+        }, BigNumber.from(0));
+
+        const depositAddress = await strategy.depositAddress(user.address);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bayc.mint(depositAddress, nftAmounts[i].mainTokenId);
+        }
+
+        await ape.mint(user.address, totalAmount.mul(3));
+        await ape.connect(user).approve(strategy.address, totalAmount.mul(3));
+
+        await strategy.afterDeposit(
+            user.address, 
+            nftAmounts.map(e => e.mainTokenId), 
+            new AbiCoder().encode(["uint256[]"], [nftAmounts.map(e => e.amount)])
+        );
+        
+        await bakc.connect(user).setApprovalForAll(strategy.address, true);
+        for (let i = 0; i < nftAmounts.length; i++) {
+            await bakc.mint(user.address, nftAmounts[i].bakcTokenId);
+        }
+
+        await strategy.connect(user).stakeTokensBAKC(nftAmounts);
+
+        await strategy.flashLoanStart(
+            user.address,
+            owner.address,
+            [0, 1, 2, 3],
+            new AbiCoder().encode(["uint256[]"], [[2, 3]])
+        );
+
+        expect(await bayc.ownerOf(0)).to.equal(owner.address);
+        expect(await bayc.ownerOf(1)).to.equal(owner.address);
+        expect(await bayc.ownerOf(2)).to.equal(owner.address);
+        expect(await bayc.ownerOf(3)).to.equal(owner.address);
+        expect(await bakc.ownerOf(0)).to.equal(depositAddress);
+        expect(await bakc.ownerOf(1)).to.equal(depositAddress);
+        expect(await bakc.ownerOf(2)).to.equal(owner.address);
+        expect(await bakc.ownerOf(3)).to.equal(owner.address);
+
+        await expect(strategy.flashLoanEnd(user.address, [], new AbiCoder().encode(["uint256[]"], [[2, 3]]))).to.be.revertedWith("FlashLoanFailed");
+        await bakc.transferFrom(owner.address, depositAddress, 2);
+        await bakc.transferFrom(owner.address, depositAddress, 3);
+
+        await strategy.flashLoanEnd(user.address, [], new AbiCoder().encode(["uint256[]"], [[2, 3]]));
+    });
 });
