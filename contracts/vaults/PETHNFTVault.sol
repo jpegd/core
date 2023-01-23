@@ -10,7 +10,8 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IStableCoin.sol";
 import "../interfaces/INFTValueProvider.sol";
-import "../interfaces/INFTStrategy.sol";
+import "../interfaces/IStandardNFTStrategy.sol";
+import "../interfaces/IFlashNFTStrategy.sol";
 
 /// @title NFT lending vault
 /// @notice This contracts allows users to borrow PETH using NFTs as collateral.
@@ -88,7 +89,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 debtAmountForRepurchase;
         uint256 liquidatedAt;
         address liquidator;
-        INFTStrategy strategy;
+        IStandardNFTStrategy strategy;
     }
 
     struct Rate {
@@ -135,6 +136,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     //no accrue required
     uint8 private constant ACTION_REPURCHASE = 100;
     uint8 private constant ACTION_CLAIM_NFT = 101;
+    uint8 private constant ACTION_STRATEGY_DEPOSIT = 102;
+    uint8 private constant ACTION_STRATEGY_WITHDRAWAL = 103;
+    uint8 private constant ACTION_STRATEGY_FLASH = 104;
 
     IStableCoin public stablecoin;
     /// @notice The JPEG trait boost locker contract
@@ -150,7 +154,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @custom:oz-renamed-from jpeg
     address private unused3; //Unused after upgrade
     /// @custom:oz-renamed-from cigStaking
-    address public unused14;
+    address private unused14;
 
     IERC721Upgradeable public nftContract;
 
@@ -381,11 +385,11 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (_strategy != address(0)) {
             if (
                 !nftStrategies.contains(_strategy) ||
-                INFTStrategy(_strategy).kind() != INFTStrategy.Kind.STANDARD ||
-                !INFTStrategy(_strategy).isDeposited(_account, _nftIndex)
+                IGenericNFTStrategy(_strategy).kind() != IGenericNFTStrategy.Kind.STANDARD ||
+                !IStandardNFTStrategy(_strategy).isDeposited(_account, _nftIndex)
             ) revert InvalidStrategy();
 
-            position.strategy = INFTStrategy(_strategy);
+            position.strategy = IStandardNFTStrategy(_strategy);
         } else if (nftContract.ownerOf(_nftIndex) != address(this))
             revert Unauthorized();
 
@@ -443,7 +447,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             totalDebtAmount -= _debtAmount;
         }
 
-        INFTStrategy _strategy = position.strategy;
+        IStandardNFTStrategy _strategy = position.strategy;
         positionOwner[_nftIndex] = address(0);
         delete positions[_nftIndex];
         positionIndexes.remove(_nftIndex);
@@ -543,7 +547,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _strategyIndex,
         bytes calldata _additionalData
     ) external nonReentrant {
-        _depositInStrategy(_nftIndexes, _strategyIndex, _additionalData);
+        _depositInStrategy(msg.sender, _nftIndexes, _strategyIndex, _additionalData);
     }
 
     /// @notice Allows users to withdraw NFTs from strategies
@@ -553,7 +557,32 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         external
         nonReentrant
     {
-        _withdrawFromStrategy(_nftIndexes);
+        _withdrawFromStrategy(msg.sender, _nftIndexes);
+    }
+
+    /// @notice Allows users to use flash strategies with NFTs deposited in standard strategies.
+    /// Useful for claiming airdrops without having to withdraw NFTs.
+    /// All NFTs in `_nftIndexes` must be deposited in the same strategy.
+    /// @param _nftIndexes The list of NFT indexes to send to the flash strategy
+    /// @param _sourceStrategyIndex The strategy the NFTs are deposited into
+    /// @param _flashStrategyIndex The flash strategy to send the NFTs to
+    /// @param _sourceStrategyData Additional data to send to the standard stategy (varies depending on the strategy)
+    /// @param _flashStrategyData Additional data to send to the flash strategy (varies depending on the strategy)
+    function flashStrategyFromStandardStrategy(
+        uint256[] calldata _nftIndexes,
+        uint256 _sourceStrategyIndex,
+        uint256 _flashStrategyIndex,
+        bytes calldata _sourceStrategyData,
+        bytes calldata _flashStrategyData
+    ) external nonReentrant {
+        _flashStrategyFromStandardStrategy(
+            msg.sender,
+            _nftIndexes,
+            _sourceStrategyIndex,
+            _flashStrategyIndex,
+            _sourceStrategyData,
+            _flashStrategyData
+        );
     }
 
     /// @notice Allows the DAO to collect interest and fees before they are repaid
@@ -652,6 +681,43 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                     (uint256, address)
                 );
                 _claimExpiredInsuranceNFT(_account, nftIndex, recipient);
+            } else if (action == ACTION_STRATEGY_DEPOSIT) {
+                (
+                    uint256[] memory _nftIndexes,
+                    uint256 _strategyIndex,
+                    bytes memory _additionalData
+                ) = abi.decode(_data[i], (uint256[], uint256, bytes));
+                _depositInStrategy(
+                    _account,
+                    _nftIndexes,
+                    _strategyIndex,
+                    _additionalData
+                );
+            } else if (action == ACTION_STRATEGY_WITHDRAWAL) {
+                uint256[] memory _nftIndexes = abi.decode(
+                    _data[i],
+                    (uint256[])
+                );
+                _withdrawFromStrategy(_account, _nftIndexes);
+            } else if (action == ACTION_STRATEGY_FLASH) {
+                (
+                    uint256[] memory _nftIndexes,
+                    uint256 _sourceStrategyIndex,
+                    uint256 _flashStrategyIndex,
+                    bytes memory _sourceStrategyData,
+                    bytes memory _flashStrategyData
+                ) = abi.decode(
+                        _data[i],
+                        (uint256[], uint256, uint256, bytes, bytes)
+                    );
+                _flashStrategyFromStandardStrategy(
+                    _account,
+                    _nftIndexes,
+                    _sourceStrategyIndex,
+                    _flashStrategyIndex,
+                    _sourceStrategyData,
+                    _flashStrategyData
+                );
             } else {
                 revert UnknownAction(action);
             }
@@ -783,7 +849,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 debt = _getDebtAmount(_nftIndex);
         if (debt > 0) revert NonZeroDebt(debt);
 
-        INFTStrategy strategy = position.strategy;
+        IStandardNFTStrategy strategy = position.strategy;
         positionOwner[_nftIndex] = address(0);
         delete positions[_nftIndex];
         positionIndexes.remove(_nftIndex);
@@ -820,7 +886,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totalDebtAmount -= debtAmount;
         position.debtPortion = 0;
 
-        INFTStrategy strategy = position.strategy;
+        IStandardNFTStrategy strategy = position.strategy;
         bool insured = position.borrowType == BorrowType.USE_INSURANCE;
         if (insured) {
             position.debtAmountForRepurchase = debtAmount;
@@ -909,24 +975,25 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @dev See {depositInStrategy}
     function _depositInStrategy(
-        uint256[] calldata _nftIndexes,
+        address _owner,
+        uint256[] memory _nftIndexes,
         uint256 _strategyIndex,
-        bytes calldata _additionalData
+        bytes memory _additionalData
     ) internal {
         uint256 length = _nftIndexes.length;
         if (length == 0) revert InvalidLength();
         if (_strategyIndex >= nftStrategies.length()) revert InvalidStrategy();
 
-        INFTStrategy strategy = INFTStrategy(nftStrategies.at(_strategyIndex));
+        address strategy = nftStrategies.at(_strategyIndex);
 
         IERC721Upgradeable nft = nftContract;
-        bool isStandard = INFTStrategy(strategy).kind() ==
-            INFTStrategy.Kind.STANDARD;
-        address depositAddress = strategy.depositAddress(msg.sender);
+        bool isStandard = IGenericNFTStrategy(strategy).kind() ==
+            IGenericNFTStrategy.Kind.STANDARD;
+        address depositAddress = IGenericNFTStrategy(strategy).depositAddress(_owner);
         for (uint256 i; i < length; ++i) {
             uint256 index = _nftIndexes[i];
 
-            if (positionOwner[index] != msg.sender) revert Unauthorized();
+            if (positionOwner[index] != _owner) revert Unauthorized();
 
             Position storage position = positions[index];
             if (position.liquidatedAt > 0) revert PositionLiquidated(index);
@@ -934,15 +1001,16 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             if (address(position.strategy) != address(0))
                 revert InvalidPosition(index);
 
-            if (isStandard) position.strategy = strategy;
+            if (isStandard) position.strategy = IStandardNFTStrategy(address(strategy));
             nft.transferFrom(address(this), depositAddress, index);
 
             emit StrategyDeposit(index, address(strategy), isStandard);
         }
 
-        strategy.afterDeposit(msg.sender, _nftIndexes, _additionalData);
-
-        if (!isStandard) {
+        if (isStandard)
+            IStandardNFTStrategy(strategy).afterDeposit(_owner, _nftIndexes, _additionalData);
+        else {
+            IFlashNFTStrategy(strategy).afterDeposit(_owner, address(this), _nftIndexes, _additionalData);
             for (uint256 i; i < length; ++i) {
                 if (nft.ownerOf(_nftIndexes[i]) != address(this))
                     revert InvalidStrategy();
@@ -951,7 +1019,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @dev See {withdrawFromStrategy}
-    function _withdrawFromStrategy(uint256[] calldata _nftIndexes) internal {
+    function _withdrawFromStrategy(address _owner, uint256[] memory _nftIndexes) internal {
         uint256 length = _nftIndexes.length;
         if (length == 0) revert InvalidLength();
 
@@ -959,12 +1027,12 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         for (uint256 i; i < length; ++i) {
             uint256 index = _nftIndexes[i];
 
-            if (positionOwner[index] != msg.sender) revert Unauthorized();
+            if (positionOwner[index] != _owner) revert Unauthorized();
 
             Position storage position = positions[index];
-            INFTStrategy strategy = position.strategy;
+            IStandardNFTStrategy strategy = position.strategy;
             if (address(strategy) != address(0)) {
-                strategy.withdraw(msg.sender, address(this), index);
+                strategy.withdraw(_owner, address(this), index);
 
                 if (nft.ownerOf(index) != address(this))
                     revert InvalidStrategy();
@@ -974,6 +1042,73 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                 emit StrategyWithdrawal(index, address(strategy));
             }
         }
+    }
+
+    /// @dev See {flashStrategyFromStandardStrategy}
+    function _flashStrategyFromStandardStrategy(
+        address _owner,
+        uint256[] memory _nftIndexes,
+        uint256 _sourceStrategyIndex,
+        uint256 _flashStrategyIndex,
+        bytes memory _sourceStrategyData,
+        bytes memory _flashStrategyData
+    ) internal {
+        uint256 length = _nftIndexes.length;
+        if (length == 0) revert InvalidLength();
+
+        IFlashNFTStrategy _flashStrategy = IFlashNFTStrategy(
+            nftStrategies.at(_flashStrategyIndex)
+        );
+
+        if (_flashStrategy.kind() != IGenericNFTStrategy.Kind.FLASH)
+            revert InvalidStrategy();
+
+        address _flashDepositAddress = _flashStrategy.depositAddress(
+            _owner
+        );
+
+        IStandardNFTStrategy _sourceStrategy = IStandardNFTStrategy(
+            nftStrategies.at(_sourceStrategyIndex)
+        );
+
+        for (uint256 i; i < length; ++i) {
+            uint256 _index = _nftIndexes[i];
+
+            if (positionOwner[_index] != _owner) revert Unauthorized();
+
+            Position storage position = positions[_index];
+
+            if (position.strategy != _sourceStrategy)
+                revert InvalidPosition(_index);
+
+            //event emitted here to replicate the behaviour in {_depositInStrategy}
+            emit StrategyDeposit(_index, address(_flashStrategy), false);
+        }
+
+        address _returnAddress = _sourceStrategy.flashLoanStart(
+            _owner,
+            _flashDepositAddress,
+            _nftIndexes,
+            _sourceStrategyData
+        );
+        _flashStrategy.afterDeposit(
+            _owner,
+            _returnAddress,
+            _nftIndexes,
+            _flashStrategyData
+        );
+
+        IERC721Upgradeable _nft = nftContract;
+        for (uint256 i; i < length; i++) {
+            if (_nft.ownerOf(_nftIndexes[i]) != _returnAddress)
+                revert InvalidStrategy();
+        }
+
+        _sourceStrategy.flashLoanEnd(
+            _owner,
+            _nftIndexes,
+            _sourceStrategyData
+        );
     }
 
     /// @dev Returns the credit limit of an NFT
