@@ -251,7 +251,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         uint256 _jpegPrice,
         uint128 _rateIncreaseBps
     ) external view returns (uint256) {
-        if (_rateIncreaseBps >= 10000)
+        if (_rateIncreaseBps >= 10000 || _rateIncreaseBps == 0)
             revert InvalidAmount(_rateIncreaseBps);
 
         Rate memory _rateIncrease = Rate(_rateIncreaseBps, 10000);
