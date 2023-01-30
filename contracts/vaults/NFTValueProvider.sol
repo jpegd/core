@@ -166,7 +166,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
         jpegLockedMaxRateIncrease = Rate(25, 100);
 
-        Rate memory _rate = Rate(150, 10000);
+        Rate memory _rate = Rate(1500, 10000);
         uint256 _length = _positionIndexes.length;
         for (uint256 i; i < _length; ++i) {
             ltvBoostRateIncreases[_positionIndexes[i]] = _rate;
