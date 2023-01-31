@@ -4,6 +4,8 @@ pragma solidity ^0.8.4;
 import "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
+import "../interfaces/IVaultHelper.sol";
+
 //inspired by https://github.com/thousandetherhomepage/ketherhomepage/blob/master/contracts/KetherNFT.sol
 /// @title FlashEscrow contract 
 /// @notice This contract sends and receives non ERC721 NFTs
@@ -28,14 +30,14 @@ contract FlashEscrow {
 /// - The child contract can then call the `_executeTransfer` function to deploy an instance of the {FlashEscrow} contract, deployed at the address calculated in the previous step
 /// This allows atomic transfers, as the address calculated by the `precompute` function is unique and changes depending by the `_owner` address and the NFT index (`_idx`).
 /// This is an alternative to the classic "reservation" method, which requires users to call 3 functions in a specifc order (making the process non atomic)
-abstract contract NFTEscrow is Initializable {
+abstract contract NFTEscrow is Initializable, IVaultHelper {
     /// @notice The address of the non ERC721 NFT supported by the child contract
-    address public nftAddress;
+    address public override nftContract;
 
     /// @dev Initializer function, see https://docs.openzeppelin.com/upgrades-plugins/1.x/writing-upgradeable
     /// @param _nftAddress See `nftAddress`
     function __NFTEscrow_init(address _nftAddress) internal initializer {
-        nftAddress = _nftAddress;
+        nftContract = _nftAddress;
     }
 
     /// @dev Computes the bytecode of the {FlashEscrow} instance to deploy
@@ -49,7 +51,7 @@ abstract contract NFTEscrow is Initializable {
         return
             abi.encodePacked(
                 type(FlashEscrow).creationCode,
-                abi.encode(nftAddress, _encodeFlashEscrowPayload(_idx))
+                abi.encode(nftContract, _encodeFlashEscrowPayload(_idx))
             );
     }
 
@@ -67,7 +69,7 @@ abstract contract NFTEscrow is Initializable {
     function _executeTransfer(address _owner, uint256 _idx) internal {
         (bytes32 salt, ) = precompute(_owner, _idx);
         new FlashEscrow{salt: salt}(
-            nftAddress,
+            nftContract,
             _encodeFlashEscrowPayload(_idx)
         );
     }
