@@ -25,8 +25,8 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
     /// @dev If the owner of the punk is this contract we return the address of the {NFTVault} for compatibility
     /// @param _idx The punk index
     /// @return The owner of the punk if != `address(this)`, otherwise the the owner of this contract
-    function ownerOf(uint256 _idx) external view returns (address) {
-        address account = ICryptoPunks(nftAddress).punkIndexToAddress(_idx);
+    function ownerOf(uint256 _idx) external view override returns (address) {
+        address account = ICryptoPunks(nftContract).punkIndexToAddress(_idx);
 
         return account == address(this) ? owner() : account;
     }
@@ -39,7 +39,7 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
         address _from,
         address _to,
         uint256 _idx
-    ) external onlyOwner {
+    ) external override onlyOwner {
         _transferFrom(_from, _to, _idx);
     }
 
@@ -53,13 +53,13 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
         address _from,
         address _to,
         uint256 _idx
-    ) external onlyOwner {
+    ) external override onlyOwner {
         _transferFrom(_from, _to, _idx);
     }
 
     /// @inheritdoc NFTEscrow
     function rescueNFT(uint256 _idx) external override {
-        ICryptoPunks punks = ICryptoPunks(nftAddress);
+        ICryptoPunks punks = ICryptoPunks(nftContract);
         
         (, address predictedAddress) = precompute(msg.sender, _idx);
         address owner = punks.punkIndexToAddress(_idx);
@@ -80,7 +80,7 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
         address _to,
         uint256 _idx
     ) internal {
-        ICryptoPunks punks = ICryptoPunks(nftAddress);
+        ICryptoPunks punks = ICryptoPunks(nftContract);
 
         address account = punks.punkIndexToAddress(_idx);
 

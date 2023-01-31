@@ -25,8 +25,8 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
     /// @dev If the owner of the rock is this contract we return the address of the {NFTVault} for compatibility
     /// @param _idx The rock index
     /// @return The owner of the rock if != `address(this)`, otherwise the the owner of this contract
-    function ownerOf(uint256 _idx) external view returns (address) {
-        (address account,,,) = IEtherRocks(nftAddress).getRockInfo(_idx);
+    function ownerOf(uint256 _idx) external override view returns (address) {
+        (address account,,,) = IEtherRocks(nftContract).getRockInfo(_idx);
 
         return account == address(this) ? owner() : account;
     }
@@ -39,7 +39,7 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
         address _from,
         address _to,
         uint256 _idx
-    ) external onlyOwner {
+    ) external override onlyOwner {
         _transferFrom(_from, _to, _idx);
     }
 
@@ -53,13 +53,13 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
         address _from,
         address _to,
         uint256 _idx
-    ) external onlyOwner {
+    ) external override onlyOwner {
         _transferFrom(_from, _to, _idx);
     }
 
     /// @inheritdoc NFTEscrow
     function rescueNFT(uint256 _idx) external override {
-        IEtherRocks rocks = IEtherRocks(nftAddress);
+        IEtherRocks rocks = IEtherRocks(nftContract);
         (, address predictedAddress) = precompute(msg.sender, _idx);
         (address owner,,,) = rocks.getRockInfo(_idx);
         require(owner == predictedAddress, "NOT_OWNER");
@@ -79,7 +79,7 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
         address _to,
         uint256 _idx
     ) internal {
-        IEtherRocks rocks = IEtherRocks(nftAddress);
+        IEtherRocks rocks = IEtherRocks(nftContract);
 
         (address account,,,) = rocks.getRockInfo(_idx);
 
