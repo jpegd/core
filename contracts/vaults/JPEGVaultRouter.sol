@@ -5,7 +5,7 @@ import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import "../interfaces/INFTVault.sol";
-import "../interfaces/INFTEscrow.sol";
+import "../interfaces/IVaultHelper.sol";
 
 contract JPEGVaultRouter is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     error InvalidLength();
@@ -136,8 +136,8 @@ contract JPEGVaultRouter is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         uint256 _debt;
         if (_isWrapped) {
             if (
-                INFTEscrow(_sourceNft).nftAddress() !=
-                INFTEscrow(_destNft).nftAddress()
+                IVaultHelper(_sourceNft).nftContract() !=
+                IVaultHelper(_destNft).nftContract()
             ) revert IncompatibleVaults(_sourceVault, _destVault);
 
             _debt = _sourceVault.forceClosePosition(

@@ -194,15 +194,6 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     EnumerableSetUpgradeable.AddressSet private nftStrategies;
 
-    /// @dev Checks if the provided NFT index is valid
-    /// @param nftIndex The index to check
-    modifier validNFTIndex(uint256 nftIndex) {
-        //The standard OZ ERC721 implementation of ownerOf reverts on a non existing nft isntead of returning address(0)
-        if (nftContract.ownerOf(nftIndex) == address(0))
-            revert InvalidNFT(nftIndex);
-        _;
-    }
-
     /// @notice This function is only called once during deployment of the proxy contract. It's not called after upgrades.
     /// @param _stablecoin PETH address
     /// @param _nftContract The NFT contract address. It could also be the address of an helper contract
@@ -368,7 +359,13 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _amount,
         bool _insurance,
         address _strategy
-    ) external nonReentrant onlyRole(ROUTER_ROLE) {
+    ) 
+        external 
+        nonReentrant 
+        onlyRole(ROUTER_ROLE) 
+    {
+        _validNFTIndex(_nftIndex);
+
         accrue();
 
         if (positionOwner[_nftIndex] != address(0)) revert Unauthorized();
@@ -433,7 +430,14 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address _account,
         uint256 _nftIndex,
         address _recipient
-    ) external nonReentrant onlyRole(ROUTER_ROLE) returns (uint256) {
+    ) 
+        external
+        nonReentrant
+        onlyRole(ROUTER_ROLE)
+        returns (uint256)
+    {
+        _validNFTIndex(_nftIndex);
+
         accrue();
 
         if (_account != positionOwner[_nftIndex]) revert Unauthorized();
@@ -730,7 +734,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _nftIndex,
         uint256 _amount,
         bool _useInsurance
-    ) internal validNFTIndex(_nftIndex) {
+    ) internal {
+        _validNFTIndex(_nftIndex);
+
         address owner = positionOwner[_nftIndex];
         if (owner != _account && owner != address(0)) revert Unauthorized();
 
@@ -797,7 +803,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address _account,
         uint256 _nftIndex,
         uint256 _amount
-    ) internal validNFTIndex(_nftIndex) {
+    ) internal {
+        _validNFTIndex(_nftIndex);
+        
         if (_account != positionOwner[_nftIndex]) revert Unauthorized();
 
         if (_amount == 0) revert InvalidAmount(_amount);
@@ -839,8 +847,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev See {closePosition}
     function _closePosition(address _account, uint256 _nftIndex)
         internal
-        validNFTIndex(_nftIndex)
     {
+        _validNFTIndex(_nftIndex);
+
         if (_account != positionOwner[_nftIndex]) revert Unauthorized();
 
         Position storage position = positions[_nftIndex];
@@ -866,8 +875,10 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address _account,
         uint256 _nftIndex,
         address _recipient
-    ) internal validNFTIndex(_nftIndex) {
+    ) internal {
         _checkRole(LIQUIDATOR_ROLE, _account);
+        _validNFTIndex(_nftIndex);
+
         address posOwner = positionOwner[_nftIndex];
         if (posOwner == address(0)) revert InvalidPosition(_nftIndex);
 
@@ -913,8 +924,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev See {repurchase}
     function _repurchase(address _account, uint256 _nftIndex)
         internal
-        validNFTIndex(_nftIndex)
     {
+        _validNFTIndex(_nftIndex);
+
         Position memory position = positions[_nftIndex];
         if (_account != positionOwner[_nftIndex]) revert Unauthorized();
         if (position.liquidatedAt == 0) revert InvalidPosition(_nftIndex);
@@ -952,7 +964,9 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address _account,
         uint256 _nftIndex,
         address _recipient
-    ) internal validNFTIndex(_nftIndex) {
+    ) internal {
+        _validNFTIndex(_nftIndex);
+        
         if (_recipient == address(0)) revert ZeroAddress();
         Position memory position = positions[_nftIndex];
         address owner = positionOwner[_nftIndex];
@@ -1109,6 +1123,11 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             _nftIndexes,
             _sourceStrategyData
         );
+    }
+
+    function _validNFTIndex(uint256 _nftIndex) internal view {
+        if (nftContract.ownerOf(_nftIndex) == address(0))
+            revert InvalidNFT(_nftIndex);
     }
 
     /// @dev Returns the credit limit of an NFT

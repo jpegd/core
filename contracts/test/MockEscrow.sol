@@ -3,14 +3,14 @@ pragma solidity ^0.8.4;
 
 contract MockEscrow {
 
-    address public nftAddress;
+    address public nftContract;
 
     constructor(address _addr) {
-        nftAddress = _addr;
+        nftContract = _addr;
     }
 
     function setNFTAddress(address _addr) external {
-        nftAddress = _addr;
+        nftContract = _addr;
     }
 
 }
