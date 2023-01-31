@@ -2,7 +2,6 @@
 pragma solidity ^0.8.4;
 
 interface INFTVault {
-
     struct Rate {
         uint128 numerator;
         uint128 denominator;
@@ -10,16 +9,37 @@ interface INFTVault {
 
     struct VaultSettings {
         Rate debtInterestApr;
-        Rate creditLimitRate;
-        Rate liquidationLimitRate;
-        Rate cigStakedCreditLimitRate;
-        Rate cigStakedLiquidationLimitRate;
-        Rate valueIncreaseLockRate;
+        /// @custom:oz-renamed-from creditLimitRate
+        Rate unused15;
+        /// @custom:oz-renamed-from liquidationLimitRate
+        Rate unused16;
+        /// @custom:oz-renamed-from cigStakedCreditLimitRate
+        Rate unused17;
+        /// @custom:oz-renamed-from cigStakedLiquidationLimitRate
+        Rate unused18;
+        /// @custom:oz-renamed-from valueIncreaseLockRate
+        Rate unused12;
         Rate organizationFeeRate;
         Rate insurancePurchaseRate;
         Rate insuranceLiquidationPenaltyRate;
         uint256 insuranceRepurchaseTimeLimit;
         uint256 borrowAmountCap;
+    }
+
+    enum BorrowType {
+        NOT_CONFIRMED,
+        NON_INSURANCE,
+        USE_INSURANCE
+    }
+
+    struct Position {
+        BorrowType borrowType;
+        uint256 debtPrincipal;
+        uint256 debtPortion;
+        uint256 debtAmountForRepurchase;
+        uint256 liquidatedAt;
+        address liquidator;
+        address strategy;
     }
 
     function settings() external view returns (VaultSettings memory);
@@ -28,4 +48,30 @@ interface INFTVault {
 
     function setSettings(VaultSettings calldata _settings) external;
 
+    function doActionsFor(
+        address _account,
+        uint8[] calldata _actions,
+        bytes[] calldata _data
+    ) external;
+
+    function hasStrategy(address _strategy) external view returns (bool);
+
+    function stablecoin() external view returns (address);
+    function nftContract() external view returns (address);
+
+    function positions(uint256 _idx) external view returns (Position memory);
+
+    function forceClosePosition(
+        address _account,
+        uint256 _nftIndex,
+        address _recipient
+    ) external returns (uint256);
+
+    function importPosition(
+        address _account,
+        uint256 _nftIndex,
+        uint256 _amount,
+        bool _insurance,
+        address _strategy
+    ) external;
 }

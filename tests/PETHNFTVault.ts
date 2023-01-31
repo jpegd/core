@@ -38,6 +38,8 @@ const liquidator_role =
 	"0x5e17fc5225d4a099df75359ce1f405503ca79498a8dc46a7d583235a0ee45c16";
 const whitelisted_role =
 	"0x8429d542926e6695b59ac6fbdcd9b37e8b1aeb757afab06ab60b1bb5878c3b49";
+const router_role = 
+	"0x7a05a596cb0ce7fdea8a1e1ec73be300bdb35097c944ce1897202f7a13122eb2";
 const apes = [
 	372, 1021, 2140, 2243, 2386, 2460, 2491, 2711, 2924, 4156, 4178, 4464, 5217,
 	5314, 5577, 5795, 6145, 6915, 6965, 7191, 8219, 8498, 9265, 9280,
@@ -161,6 +163,7 @@ describe("PETHNFTVault", () => {
 
 		await nftVault.grantRole(dao_role, dao.address);
 		await nftVault.grantRole(liquidator_role, dao.address);
+		await nftVault.grantRole(router_role, owner.address);
 		await nftVault.revokeRole(dao_role, owner.address);
 		await ethVault.grantRole(default_admin_role, dao.address);
 		await ethVault.grantRole(whitelisted_role, dao.address);
@@ -345,7 +348,10 @@ describe("PETHNFTVault", () => {
 	});
 
 	it("should be able to liquidate borrow position without insurance", async () => {
-		await expect(nftVault.connect(user).liquidate(10001, owner.address)).to.be.revertedWith(
+		const index = 4000;
+		await erc721.mint(user.address, index);
+
+		await expect(nftVault.connect(user).liquidate(index, owner.address)).to.be.revertedWith(
 			"AccessControl: account " +
 			user.address.toLowerCase() +
 			" is missing role " +
@@ -355,9 +361,6 @@ describe("PETHNFTVault", () => {
 		await expect(nftVault.connect(dao).liquidate(10001, owner.address)).to.be.revertedWith(
 			"InvalidNFT(10001)"
 		);
-
-		const index = 4000;
-		await erc721.mint(user.address, index);
 
 		expect(await nftVault.positionOwner(index)).to.equal(ZERO_ADDRESS);
 
@@ -708,6 +711,93 @@ describe("PETHNFTVault", () => {
 
 		expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
 		expect(await nftVault.totalPositions()).to.equal(0);
+	});
+
+	it("should allow the router to forcefully close positions", async () => {
+		const Standard = await ethers.getContractFactory("MockStandardStrategy")
+		const standard = await Standard.deploy(erc721.address);
+		await nftVault.connect(dao).addStrategy(standard.address);
+
+		const index1 = 5000;
+		const index2 = 5001;
+		await erc721.mint(user.address, index1);
+		await erc721.mint(user.address, index2);
+		await erc721.connect(user).setApprovalForAll(nftVault.address, true);
+		
+		const borrowAmount = units(1).mul(10);
+
+		await nftVault.connect(user).borrow(index1, borrowAmount, true);
+		await nftVault.connect(user).borrow(index2, borrowAmount, true);
+
+		await nftVault.connect(user).depositInStrategy([index2], 0, "0x");
+
+		await expect(nftVault.forceClosePosition(owner.address, index1, owner.address)).to.be.revertedWith("Unauthorized()");
+
+		await nftVault.forceClosePosition(user.address, index1, owner.address);
+
+		expect(await erc721.ownerOf(index1)).to.equal(owner.address);
+		expect(await nftVault.positionOwner(index1)).to.equal(ZERO_ADDRESS);
+		expect(await nftVault.totalDebtAmount()).to.equal(borrowAmount.add(await nftVault.getDebtInterest(index2)));
+		expect((await nftVault.openPositionsIndexes()).length).to.equal(1);
+
+		await nftVault.forceClosePosition(user.address, index2, owner.address);
+
+		expect(await erc721.ownerOf(index2)).to.equal(owner.address);
+		expect(await nftVault.positionOwner(index2)).to.equal(ZERO_ADDRESS);
+		expect(await nftVault.totalDebtAmount()).to.equal(0);
+		expect((await nftVault.openPositionsIndexes()).length).to.equal(0);
+	});
+
+	it("should allow the router to import positions", async () => {
+		const Standard = await ethers.getContractFactory("MockStandardStrategy")
+		const standard = await Standard.deploy(erc721.address);
+
+		const index1 = 5000;
+		const index2 = 5001;
+		await erc721.mint(user.address, index1);
+		await erc721.mint(user.address, index2);
+		await erc721.connect(user).setApprovalForAll(nftVault.address, true);
+		
+		const borrowAmount = units(1).mul(10);
+		
+		await expect(nftVault.importPosition(user.address, index1, units(4000).mul(1000), true, standard.address)).to.be.revertedWith("DebtCapReached()");
+		await expect(nftVault.importPosition(user.address, index1, units(2000).mul(1000), true, standard.address)).to.be.revertedWith("InvalidAmount(" + units(2000).mul(1000).toString() + ")");
+		await expect(nftVault.importPosition(user.address, index1, borrowAmount, true, standard.address)).to.be.revertedWith("InvalidStrategy()");
+
+		await nftVault.connect(dao).addStrategy(standard.address);
+
+		await expect(nftVault.importPosition(user.address, index1, borrowAmount, true, standard.address)).to.be.revertedWith("InvalidStrategy()");
+		await erc721.connect(user).transferFrom(user.address, standard.address, index1);
+
+		await nftVault.importPosition(user.address, index1, borrowAmount, true, standard.address);
+
+		expect(await nftVault.positionOwner(index1)).to.equal(user.address);
+		
+		let position = await nftVault.positions(index1);
+
+		expect(position.debtPrincipal).to.equal(borrowAmount);
+		expect(position.borrowType).to.equal(2);
+		expect(position.strategy).to.equal(standard.address);
+		expect((await nftVault.openPositionsIndexes()).length).to.equal(1);
+		expect(await nftVault.totalDebtAmount()).to.equal(borrowAmount.add(await nftVault.getDebtInterest(index1)));
+
+		await expect(nftVault.importPosition(user.address, index1, borrowAmount, true, ZERO_ADDRESS)).to.be.revertedWith("Unauthorized()");
+		await expect(nftVault.importPosition(user.address, index2, borrowAmount, true, ZERO_ADDRESS)).to.be.revertedWith("Unauthorized()");
+
+		await erc721.connect(user).transferFrom(user.address, nftVault.address, index2);
+
+		await nftVault.importPosition(user.address, index2, borrowAmount, true, ZERO_ADDRESS);
+
+		expect(await nftVault.positionOwner(index2)).to.equal(user.address);
+		
+		position = await nftVault.positions(index2);
+
+		expect(position.debtPrincipal).to.equal(borrowAmount);
+		expect(position.borrowType).to.equal(2);
+		expect(position.strategy).to.equal(ZERO_ADDRESS);
+		expect((await nftVault.openPositionsIndexes()).length).to.equal(2);
+
+		expect(await nftVault.totalDebtAmount()).to.equal(borrowAmount.mul(2).add(await nftVault.getDebtInterest(index1)).add(await nftVault.getDebtInterest(index2)));
 	});
 
 	it("should allow users to execute multiple actions in one call", async () => {

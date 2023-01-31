@@ -87,6 +87,20 @@ abstract contract AbstractApeStakingStrategy is
             );
     }
 
+    function isDeposited(address _owner, uint256 _nftIndex)
+        external
+        view
+        override
+        returns (bool)
+    {
+        return
+            IERC721Upgradeable(mainNftContract).ownerOf(_nftIndex) ==
+            ClonesUpgradeable.predictDeterministicAddress(
+                clonesImplementation,
+                _salt(_owner)
+            );
+    }
+
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
     }
@@ -308,7 +322,7 @@ abstract contract AbstractApeStakingStrategy is
     /// @dev Flash loan end function. Checks if the BAKCs in `_additionalData` have been returned.
     /// It doesn't perform any safety checks on the main collection IDs as they are already done by the vault.
     /// @param _owner The owner of the returned NFTs
-    /// @param _additionalData Array containing the list of BAKC ids returned
+    /// @param _additionalData Array containing the list of BAKC ids returned.
     function flashLoanEnd(
         address _owner,
         uint256[] calldata,
