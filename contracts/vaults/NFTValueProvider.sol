@@ -37,7 +37,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         uint256 indexed index,
         uint256 amount,
         uint256 unlockTime,
-        Rate rateIncrease
+        uint128 rateIncreaseBps
     );
 
     event TraitBoostUnlock(
@@ -531,7 +531,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             );
             ltvBoostRateIncreases[_index] = _rateIncrease;
 
-            emit LTVBoostLock(msg.sender, _index, _jpegToLock, _unlockAt, _rateIncrease);
+            emit LTVBoostLock(msg.sender, _index, _jpegToLock, _unlockAt, _rateIncrease.numerator);
         }
 
         if (_requiredJPEG > _jpegToRefund)
