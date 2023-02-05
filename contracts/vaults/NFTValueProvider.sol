@@ -159,12 +159,12 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         minJPEGToLock = _minJPEGToLock;
     }
 
-    function finalizeUpgrade(uint256[] memory _positionIndexes) external {
-        if (jpegLockedMaxRateIncrease.numerator == 25) {
+    function finalizeUpgrade(uint128 _maxRateIncreaseBps, uint256[] memory _positionIndexes) external {
+        if (jpegLockedMaxRateIncrease.denominator == 10000) {
             revert();
         }
 
-        jpegLockedMaxRateIncrease = Rate(25, 100);
+        jpegLockedMaxRateIncrease = Rate(_maxRateIncreaseBps, 10000);
 
         Rate memory _rate = Rate(1500, 10000);
         uint256 _length = _positionIndexes.length;
