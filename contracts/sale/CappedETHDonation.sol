@@ -3,12 +3,12 @@ pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "../interfaces/IJPEGCardsCigStaking.sol";
 
 contract CappedETHDonation is Ownable {
     error OngoingDonation();
-    error ZeroRoot();
-    error InvalidProof();
+    error Unauthorized();
     error InactiveDonation();
     error InvalidAmount();
     error InvalidStart();
@@ -31,7 +31,6 @@ contract CappedETHDonation is Ownable {
         uint256 totalCap;
         uint256 walletCap;
         uint256 whitelistCap;
-        bytes32 whitelistRoot;
         uint256 start;
         uint256 whitelistEnd;
         uint256 end;
@@ -39,8 +38,16 @@ contract CappedETHDonation is Ownable {
         mapping(address => uint256) donations;
     }
 
+    IERC721 public immutable CARDS;
+    IJPEGCardsCigStaking public immutable CIG_STAKING;
+
     uint256 public donationIndex;
     mapping(uint256 => DonationEvent) public donationEvents;
+
+    constructor (IERC721 _cards, IJPEGCardsCigStaking _cigStaking) {
+        CARDS = _cards;
+        CIG_STAKING = _cigStaking;
+    }
 
     receive() external payable {
         donate();
@@ -59,7 +66,6 @@ contract CappedETHDonation is Ownable {
     /// @param _cap The maximum amount of ETH that can be donated
     /// @param _walletCap The maximum amount of ETH that can be donated per wallet
     /// @param _whitelistCap The maximum amount of ETH that can be donated per whitelisted wallet
-    /// @param _whitelistRoot The merkle root for the whitelist
     /// @param _start The event's start timestamp
     /// @param _whitelistDuration The duration of the whitelist only period, can be 0 for no whitelist
     /// @param _publicDuration The duration of the public donation period
@@ -67,7 +73,6 @@ contract CappedETHDonation is Ownable {
         uint256 _cap,
         uint256 _walletCap,
         uint256 _whitelistCap,
-        bytes32 _whitelistRoot,
         uint256 _start,
         uint256 _whitelistDuration,
         uint256 _publicDuration
@@ -83,10 +88,8 @@ contract CappedETHDonation is Ownable {
 
         if (_whitelistDuration > 0) {
             if (_whitelistCap == 0) revert InvalidAmount();
-            if (_whitelistRoot == bytes32(0)) revert ZeroRoot();
 
             _donation.whitelistCap = _whitelistCap;
-            _donation.whitelistRoot = _whitelistRoot;
             _donation.whitelistEnd = _start + _whitelistDuration;
         } else _donation.whitelistEnd = _start;
 
@@ -124,7 +127,7 @@ contract CappedETHDonation is Ownable {
     }
 
     /// @notice Allows whitelisted users to donate ETH in the current donation event.
-    function donateWhitelist(bytes32[] calldata _merkleProof) external payable {
+    function donateWhitelist() external payable {
         uint256 _donationIndex = donationIndex;
         DonationEvent storage _event = donationEvents[_donationIndex];
         if (
@@ -132,9 +135,8 @@ contract CappedETHDonation is Ownable {
             _event.whitelistEnd <= block.timestamp
         ) revert InactiveDonation();
 
-        bytes32 _leaf = keccak256(abi.encodePacked(msg.sender));
-        if (!MerkleProof.verify(_merkleProof, _event.whitelistRoot, _leaf))
-            revert InvalidProof();
+        if (CARDS.balanceOf(msg.sender) == 0 && !CIG_STAKING.isUserStaking(msg.sender))
+            revert Unauthorized();
 
         uint256 _newDonatedAmount = _event.donatedAmount + msg.value;
         uint256 _newUserDonatedAmount = _event.donations[msg.sender] +
