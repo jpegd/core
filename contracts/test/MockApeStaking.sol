@@ -167,7 +167,7 @@ contract MockApeStaking is IApeStaking {
             require(_contract.ownerOf(nft.mainTokenId) == msg.sender);
             require(_bakc.ownerOf(nft.bakcTokenId) == msg.sender);
             if(!nft.isUncommit) {
-                if(nft.amount == depositedAmounts[bakcID][nft.bakcTokenId]) revert();
+                if(nft.amount > depositedAmounts[bakcID][nft.bakcTokenId]) revert();
             }
 
             if (nft.isUncommit) {
