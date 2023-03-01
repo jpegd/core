@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "../interfaces/IStandardNFTStrategy.sol";
 
 contract MockStandardStrategy is IStandardNFTStrategy {
-
     IERC721 nft;
     bool sendBack;
 
@@ -18,14 +17,26 @@ contract MockStandardStrategy is IStandardNFTStrategy {
         sendBack = _sendBack;
     }
 
-    function afterDeposit(address, uint256[] calldata, bytes calldata) external override {}
+    function afterDeposit(
+        address,
+        uint256[] calldata,
+        bytes calldata
+    ) external override {}
 
-    function withdraw(address, address _recipient, uint256 _nftIndex) external override {
-        if (sendBack)
-            nft.transferFrom(address(this), _recipient, _nftIndex);
+    function withdraw(
+        address,
+        address _recipient,
+        uint256 _nftIndex
+    ) external override {
+        if (sendBack) nft.transferFrom(address(this), _recipient, _nftIndex);
     }
 
-    function flashLoanStart(address, address _recipient, uint256[] calldata _nftIndexes, bytes calldata) external override returns (address) {
+    function flashLoanStart(
+        address,
+        address _recipient,
+        uint256[] calldata _nftIndexes,
+        bytes calldata
+    ) external override returns (address) {
         for (uint256 i; i < _nftIndexes.length; i++) {
             nft.transferFrom(address(this), _recipient, _nftIndexes[i]);
         }
@@ -33,7 +44,11 @@ contract MockStandardStrategy is IStandardNFTStrategy {
         return address(this);
     }
 
-    function flashLoanEnd(address, uint256[] calldata, bytes calldata) external override {}
+    function flashLoanEnd(
+        address,
+        uint256[] calldata,
+        bytes calldata
+    ) external override {}
 
     function depositAddress(address) external view override returns (address) {
         return address(this);
@@ -43,8 +58,10 @@ contract MockStandardStrategy is IStandardNFTStrategy {
         return Kind.STANDARD;
     }
 
-    function isDeposited(address, uint256 _nftIndex) external view override returns (bool) {
+    function isDeposited(
+        address,
+        uint256 _nftIndex
+    ) external view override returns (bool) {
         return nft.ownerOf(_nftIndex) == address(this);
     }
-
 }

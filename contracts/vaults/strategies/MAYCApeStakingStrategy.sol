@@ -4,16 +4,15 @@ pragma solidity ^0.8.4;
 import "./AbstractApeStakingStrategy.sol";
 
 contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
-    
-    function _depositSelector() internal override pure returns (bytes4) {
+    function _depositSelector() internal pure override returns (bytes4) {
         return IApeStaking.depositMAYC.selector;
     }
 
-    function _withdrawSelector() internal override pure returns (bytes4) {
+    function _withdrawSelector() internal pure override returns (bytes4) {
         return IApeStaking.withdrawMAYC.selector;
     }
 
-    function _claimSelector() internal override pure returns (bytes4) {
+    function _claimSelector() internal pure override returns (bytes4) {
         return IApeStaking.claimMAYC.selector;
     }
 
@@ -28,12 +27,9 @@ contract MAYCApeStakingStrategy is AbstractApeStakingStrategy {
             );
     }
 
-    function _withdrawBAKCCalldata(IApeStaking.PairNftWithdrawWithAmount[] memory _nfts)
-        internal
-        pure
-        override
-        returns (bytes memory)
-    {
+    function _withdrawBAKCCalldata(
+        IApeStaking.PairNftWithdrawWithAmount[] memory _nfts
+    ) internal pure override returns (bytes memory) {
         return
             abi.encodeWithSelector(
                 IApeStaking.withdrawBAKC.selector,

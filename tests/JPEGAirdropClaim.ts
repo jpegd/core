@@ -13,7 +13,8 @@ const vesting_controller_role =
 
 describe("JPEGAirdropClaim", function () {
     let owner: SignerWithAddress,
-        whitelistedUser1: SignerWithAddress, whitelistedUser2: SignerWithAddress,
+        whitelistedUser1: SignerWithAddress,
+        whitelistedUser2: SignerWithAddress,
         user: SignerWithAddress;
 
     let merkleTree: MerkleTree;
@@ -41,11 +42,18 @@ describe("JPEGAirdropClaim", function () {
         aJpeg = await JPEGAirdrop.deploy(jpeg.address);
         await aJpeg.deployed();
 
-        const leafs = [whitelistedUser1, whitelistedUser2].map(wl => keccak256(wl.address));
+        const leafs = [whitelistedUser1, whitelistedUser2].map(wl =>
+            keccak256(wl.address)
+        );
         merkleTree = new MerkleTree(leafs, keccak256, { sortPairs: true });
 
-        const JPEGAirdropClaim = await ethers.getContractFactory("JPEGAirdropClaim");
-        airdropClaim = await JPEGAirdropClaim.deploy(aJpeg.address, merkleTree.getHexRoot());
+        const JPEGAirdropClaim = await ethers.getContractFactory(
+            "JPEGAirdropClaim"
+        );
+        airdropClaim = await JPEGAirdropClaim.deploy(
+            aJpeg.address,
+            merkleTree.getHexRoot()
+        );
 
         await aJpeg.grantRole(vesting_controller_role, airdropClaim.address);
 
@@ -100,9 +108,13 @@ describe("JPEGAirdropClaim", function () {
     });
 
     it("shouldn't allow whitelisted users to claim the airdrop before the schedule is set", async () => {
-        const proof = merkleTree.getHexProof(keccak256(whitelistedUser1.address));
+        const proof = merkleTree.getHexProof(
+            keccak256(whitelistedUser1.address)
+        );
 
-        await expect(airdropClaim.connect(whitelistedUser1).claimAirdrop(proof)).to.be.revertedWith("SCHEDULE_NOT_SET");
+        await expect(
+            airdropClaim.connect(whitelistedUser1).claimAirdrop(proof)
+        ).to.be.revertedWith("SCHEDULE_NOT_SET");
     });
 
     it("should allow whitelisted users to claim after the schedule has been set", async () => {
@@ -113,12 +125,18 @@ describe("JPEGAirdropClaim", function () {
             units(1000000000)
         );
 
-        const proof = merkleTree.getHexProof(keccak256(whitelistedUser1.address));
+        const proof = merkleTree.getHexProof(
+            keccak256(whitelistedUser1.address)
+        );
         await airdropClaim.connect(whitelistedUser1).claimAirdrop(proof);
 
-        expect(await aJpeg.balanceOf(whitelistedUser1.address)).to.equal(units(1000000000));
+        expect(await aJpeg.balanceOf(whitelistedUser1.address)).to.equal(
+            units(1000000000)
+        );
 
-        await expect(airdropClaim.connect(whitelistedUser1).claimAirdrop(proof)).to.be.revertedWith("ALREADY_CLAIMED");
+        await expect(
+            airdropClaim.connect(whitelistedUser1).claimAirdrop(proof)
+        ).to.be.revertedWith("ALREADY_CLAIMED");
     });
 
     it("shouldn't allow non whitelisted users to claim", async () => {
@@ -129,8 +147,12 @@ describe("JPEGAirdropClaim", function () {
             units(1000000000)
         );
 
-        const proof = merkleTree.getHexProof(keccak256(whitelistedUser1.address));
-        await expect(airdropClaim.connect(user).claimAirdrop(proof)).to.be.revertedWith("INVALID_PROOF");
+        const proof = merkleTree.getHexProof(
+            keccak256(whitelistedUser1.address)
+        );
+        await expect(
+            airdropClaim.connect(user).claimAirdrop(proof)
+        ).to.be.revertedWith("INVALID_PROOF");
     });
 
     it("should allow the owner to withdraw tokens", async () => {

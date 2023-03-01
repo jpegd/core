@@ -159,7 +159,10 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         minJPEGToLock = _minJPEGToLock;
     }
 
-    function finalizeUpgrade(uint128 _maxRateIncreaseBps, uint256[] memory _positionIndexes) external {
+    function finalizeUpgrade(
+        uint128 _maxRateIncreaseBps,
+        uint256[] memory _positionIndexes
+    ) external {
         if (jpegLockedMaxRateIncrease.denominator == 10000) {
             revert();
         }
@@ -176,33 +179,30 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
     /// @param _nftIndex The index of the NFT to return the credit limit rate for
     /// @return The credit limit rate for the NFT with index `_nftIndex`
-    function getCreditLimitRate(address _owner, uint256 _nftIndex)
-        public
-        view
-        returns (Rate memory)
-    {
+    function getCreditLimitRate(
+        address _owner,
+        uint256 _nftIndex
+    ) public view returns (Rate memory) {
         return _rateAfterBoosts(baseCreditLimitRate, _owner, _nftIndex);
     }
 
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
     /// @param _nftIndex The index of the NFT to return the liquidation limit rate for
     /// @return The liquidation limit rate for the NFT with index `_nftIndex`
-    function getLiquidationLimitRate(address _owner, uint256 _nftIndex)
-        public
-        view
-        returns (Rate memory)
-    {
+    function getLiquidationLimitRate(
+        address _owner,
+        uint256 _nftIndex
+    ) public view returns (Rate memory) {
         return _rateAfterBoosts(baseLiquidationLimitRate, _owner, _nftIndex);
     }
 
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
     /// @param _nftIndex The index of the NFT to return the credit limit for
     /// @return The credit limit for the NFT with index `_nftIndex`, in ETH
-    function getCreditLimitETH(address _owner, uint256 _nftIndex)
-        external
-        view
-        returns (uint256)
-    {
+    function getCreditLimitETH(
+        address _owner,
+        uint256 _nftIndex
+    ) external view returns (uint256) {
         Rate memory creditLimitRate = getCreditLimitRate(_owner, _nftIndex);
         return
             (getNFTValueETH(_nftIndex) * creditLimitRate.numerator) /
@@ -212,11 +212,10 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
     /// @param _nftIndex The index of the NFT to return the liquidation limit for
     /// @return The liquidation limit for the NFT with index `_nftIndex`, in ETH
-    function getLiquidationLimitETH(address _owner, uint256 _nftIndex)
-        external
-        view
-        returns (uint256)
-    {
+    function getLiquidationLimitETH(
+        address _owner,
+        uint256 _nftIndex
+    ) external view returns (uint256) {
         Rate memory liquidationLimitRate = getLiquidationLimitRate(
             _owner,
             _nftIndex
@@ -229,11 +228,10 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// @param _nftType The NFT type to calculate the JPEG lock amount for
     /// @param _jpegPrice The JPEG price in ETH (18 decimals)
     /// @return The JPEG to lock for the specified `_nftType`
-    function calculateTraitBoostLock(bytes32 _nftType, uint256 _jpegPrice)
-        public
-        view
-        returns (uint256)
-    {
+    function calculateTraitBoostLock(
+        bytes32 _nftType,
+        uint256 _jpegPrice
+    ) public view returns (uint256) {
         return
             _calculateTraitBoostLock(
                 traitBoostLockRate,
@@ -327,20 +325,18 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// @notice Allows trait boost lock creators to unlock the JPEG associated to the NFT at index `_nftIndex`, provided the lock expired.
     /// @dev emits multiple {TraitBoostUnlock} events
     /// @param _nftIndexes The indexes of the NFTs holding the locks.
-    function withdrawTraitBoost(uint256[] calldata _nftIndexes)
-        external
-        nonReentrant
-    {
+    function withdrawTraitBoost(
+        uint256[] calldata _nftIndexes
+    ) external nonReentrant {
         _unlockJPEG(_nftIndexes, true);
     }
 
     /// @notice Allows ltv boost lock creators to unlock the JPEG associated to the NFT at index `_nftIndex`, provided the lock expired.
     /// @dev emits multiple {LTVBoostUnlock} events
     /// @param _nftIndexes The indexes of the NFTs holding the locks.
-    function withdrawLTVBoost(uint256[] calldata _nftIndexes)
-        external
-        nonReentrant
-    {
+    function withdrawLTVBoost(
+        uint256[] calldata _nftIndexes
+    ) external nonReentrant {
         _unlockJPEG(_nftIndexes, false);
     }
 
@@ -362,10 +358,10 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// @notice Allows the DAO to change the multiplier of an NFT category
     /// @param _type The category hash
     /// @param _multiplier The new multiplier
-    function setNFTTypeMultiplier(bytes32 _type, Rate calldata _multiplier)
-        external
-        onlyOwner
-    {
+    function setNFTTypeMultiplier(
+        bytes32 _type,
+        Rate calldata _multiplier
+    ) external onlyOwner {
         if (_type == bytes32(0)) revert InvalidNFTType(_type);
         _validateRateAboveOne(_multiplier);
         nftTypeValueMultiplier[_type] = _multiplier;
@@ -374,10 +370,10 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     /// @notice Allows the DAO to add an NFT to a specific price category
     /// @param _nftIndexes The indexes to add to the category
     /// @param _type The category hash
-    function setNFTType(uint256[] calldata _nftIndexes, bytes32 _type)
-        external
-        onlyOwner
-    {
+    function setNFTType(
+        uint256[] calldata _nftIndexes,
+        bytes32 _type
+    ) external onlyOwner {
         if (_type != bytes32(0) && nftTypeValueMultiplier[_type].numerator == 0)
             revert InvalidNFTType(_type);
 
@@ -386,10 +382,9 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         }
     }
 
-    function setBaseCreditLimitRate(Rate memory _baseCreditLimitRate)
-        external
-        onlyOwner
-    {
+    function setBaseCreditLimitRate(
+        Rate memory _baseCreditLimitRate
+    ) external onlyOwner {
         _validateRateBelowOne(_baseCreditLimitRate);
         if (!_greaterThan(baseLiquidationLimitRate, _baseCreditLimitRate))
             revert InvalidRate(_baseCreditLimitRate);
@@ -397,10 +392,9 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         baseCreditLimitRate = _baseCreditLimitRate;
     }
 
-    function setBaseLiquidationLimitRate(Rate memory _liquidationLimitRate)
-        external
-        onlyOwner
-    {
+    function setBaseLiquidationLimitRate(
+        Rate memory _liquidationLimitRate
+    ) external onlyOwner {
         _validateRateBelowOne(_liquidationLimitRate);
 
         if (!_greaterThan(_liquidationLimitRate, baseCreditLimitRate))
@@ -416,10 +410,9 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         baseLiquidationLimitRate = _liquidationLimitRate;
     }
 
-    function setCigStakedRateIncrease(Rate memory _cigStakedRateIncrease)
-        external
-        onlyOwner
-    {
+    function setCigStakedRateIncrease(
+        Rate memory _cigStakedRateIncrease
+    ) external onlyOwner {
         _validateRateBelowOne(_cigStakedRateIncrease);
         _validateRateBelowOne(
             _rateSum(
@@ -431,10 +424,9 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         cigStakedRateIncrease = _cigStakedRateIncrease;
     }
 
-    function setJPEGLockedMaxRateIncrease(Rate memory _jpegLockedRateIncrease)
-        external
-        onlyOwner
-    {
+    function setJPEGLockedMaxRateIncrease(
+        Rate memory _jpegLockedRateIncrease
+    ) external onlyOwner {
         _validateRateBelowOne(_jpegLockedRateIncrease);
         _validateRateBelowOne(
             _rateSum(
@@ -446,18 +438,16 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         jpegLockedMaxRateIncrease = _jpegLockedRateIncrease;
     }
 
-    function setTraitBoostLockRate(Rate memory _traitBoostLockRate)
-        external
-        onlyOwner
-    {
+    function setTraitBoostLockRate(
+        Rate memory _traitBoostLockRate
+    ) external onlyOwner {
         _validateRateBelowOne(_traitBoostLockRate);
         traitBoostLockRate = _traitBoostLockRate;
     }
 
-    function setLTVBoostLockRate(Rate memory _ltvBoostLockRate)
-        external
-        onlyOwner
-    {
+    function setLTVBoostLockRate(
+        Rate memory _ltvBoostLockRate
+    ) external onlyOwner {
         _validateRateBelowOne(_ltvBoostLockRate);
         ltvBoostLockRate = _ltvBoostLockRate;
     }
@@ -527,7 +517,13 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             );
             ltvBoostRateIncreases[_index] = _rateIncrease;
 
-            emit LTVBoostLock(msg.sender, _index, _jpegToLock, _unlockAt, _rateIncrease.numerator);
+            emit LTVBoostLock(
+                msg.sender,
+                _index,
+                _jpegToLock,
+                _unlockAt,
+                _rateIncrease.numerator
+            );
         }
 
         if (_requiredJPEG > _jpegToRefund)
@@ -621,22 +617,13 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             if (_isTraitBoost) {
                 _lock = traitBoostPositions[_index];
                 delete traitBoostPositions[_index];
-                emit TraitBoostUnlock(
-                    msg.sender, 
-                    _index, 
-                    _lock.lockedValue
-                );
-            }
-            else {
+                emit TraitBoostUnlock(msg.sender, _index, _lock.lockedValue);
+            } else {
                 _lock = ltvBoostPositions[_index];
                 delete ltvBoostPositions[_index];
                 delete ltvBoostRateIncreases[_index];
 
-                emit LTVBoostUnlock(
-                    msg.sender, 
-                    _index, 
-                    _lock.lockedValue
-                );
+                emit LTVBoostUnlock(msg.sender, _index, _lock.lockedValue);
             }
 
             if (_lock.owner != msg.sender) revert Unauthorized();
@@ -723,20 +710,18 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     }
 
     /// @dev Checks if `r1` is greater than `r2`.
-    function _greaterThan(Rate memory _r1, Rate memory _r2)
-        internal
-        pure
-        returns (bool)
-    {
+    function _greaterThan(
+        Rate memory _r1,
+        Rate memory _r2
+    ) internal pure returns (bool) {
         return
             _r1.numerator * _r2.denominator > _r2.numerator * _r1.denominator;
     }
 
-    function _rateSum(Rate memory _r1, Rate memory _r2)
-        internal
-        pure
-        returns (Rate memory)
-    {
+    function _rateSum(
+        Rate memory _r1,
+        Rate memory _r2
+    ) internal pure returns (Rate memory) {
         return
             Rate({
                 numerator: _r1.numerator *

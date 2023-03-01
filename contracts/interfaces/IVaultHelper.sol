@@ -6,11 +6,7 @@ interface IVaultHelper {
 
     function ownerOf(uint256 _idx) external view returns (address);
 
-    function transferFrom(
-        address _from,
-        address _to,
-        uint256 _idx
-    ) external;
+    function transferFrom(address _from, address _to, uint256 _idx) external;
 
     function safeTransferFrom(
         address _from,

@@ -27,12 +27,9 @@ contract BAYCApeStakingStrategy is AbstractApeStakingStrategy {
             );
     }
 
-    function _withdrawBAKCCalldata(IApeStaking.PairNftWithdrawWithAmount[] memory _nfts)
-        internal
-        pure
-        override
-        returns (bytes memory)
-    {
+    function _withdrawBAKCCalldata(
+        IApeStaking.PairNftWithdrawWithAmount[] memory _nfts
+    ) internal pure override returns (bytes memory) {
         return
             abi.encodeWithSelector(
                 IApeStaking.withdrawBAKC.selector,

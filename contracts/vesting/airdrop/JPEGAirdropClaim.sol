@@ -32,8 +32,11 @@ contract JPEGAirdropClaim is Ownable {
     constructor(ITokenVesting vestingToken, bytes32 root) {
         merkleRoot = root;
         aJPEG = vestingToken;
-        
-        IERC20(vestingToken.token()).approve(address(vestingToken), 2 ** 256 - 1);
+
+        IERC20(vestingToken.token()).approve(
+            address(vestingToken),
+            2 ** 256 - 1
+        );
     }
 
     /// @notice Allows the owner to set the airdrop's schedule. Can only be called once. Can only be called by the owner.

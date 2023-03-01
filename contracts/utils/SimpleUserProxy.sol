@@ -17,7 +17,7 @@ contract SimpleUserProxy {
     function doCall(address _target, bytes calldata _data) external payable {
         if (msg.sender != owner) revert Unauthorized();
 
-        (bool success, bytes memory result) = _target.call{value: msg.value}(
+        (bool success, bytes memory result) = _target.call{ value: msg.value }(
             _data
         );
         if (!success) {

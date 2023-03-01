@@ -10,7 +10,8 @@ interface IUniswapV2Router {
         uint256
     ) external;
 
-    function getAmountsOut(uint256, address[] calldata)
-        external
-        returns (uint256[] memory);
+    function getAmountsOut(
+        uint256,
+        address[] calldata
+    ) external returns (uint256[] memory);
 }

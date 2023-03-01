@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 /// @notice This contract allows JPEG Cards cigarette holders to stake one of their cigarettes to
 /// increase the liquidation limit rate and credit limit rate when borrowing from {NFTVault}.
 contract JPEGCardsCigStaking is Ownable, ReentrancyGuard, Pausable {
-
     event Deposit(address indexed account, uint256 indexed cardIndex);
     event Withdrawal(address indexed account, uint256 indexed cardIndex);
 
@@ -45,7 +44,7 @@ contract JPEGCardsCigStaking is Ownable, ReentrancyGuard, Pausable {
 
         UserData storage data = userData[msg.sender];
         require(!data.isStaking, "CANNOT_STAKE_MULTIPLE");
-        
+
         data.isStaking = true;
         data.stakedCig = _idx;
 
@@ -62,7 +61,7 @@ contract JPEGCardsCigStaking is Ownable, ReentrancyGuard, Pausable {
 
         data.isStaking = false;
         data.stakedCig = 0;
-        
+
         cards.safeTransferFrom(address(this), msg.sender, _idx);
 
         emit Withdrawal(msg.sender, _idx);
@@ -78,7 +77,7 @@ contract JPEGCardsCigStaking is Ownable, ReentrancyGuard, Pausable {
     function pause() external onlyOwner {
         _pause();
     }
-    
+
     /// @notice Allows the DAO to unpause deposits/withdrawals
     function unpause() external onlyOwner {
         _unpause();

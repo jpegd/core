@@ -199,10 +199,9 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
     /// @notice Allows the DAO to set the performance fee
     /// @param _performanceFee The new performance fee
-    function setPerformanceFee(Rate memory _performanceFee)
-        public
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setPerformanceFee(
+        Rate memory _performanceFee
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(
             _performanceFee.denominator != 0 &&
                 _performanceFee.denominator >= _performanceFee.numerator,
@@ -213,18 +212,16 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
     /// @notice Allows the DAO to set the USDC vault
     /// @param _vault The new USDC vault
-    function setUSDCVault(address _vault)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setUSDCVault(
+        address _vault
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_vault != address(0), "INVALID_USDC_VAULT");
         strategyConfig.usdcVault = IFungibleAssetVaultForDAO(_vault);
     }
 
-    function setFeeRecipient(address _newRecipient)
-        public
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setFeeRecipient(
+        address _newRecipient
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_newRecipient != address(0), "INVALID_FEE_RECIPIENT");
 
         feeRecipient = _newRecipient;
@@ -253,11 +250,10 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
 
     /// @notice Controller only function that allows to withdraw non-strategy tokens (e.g tokens sent accidentally).
     /// CVX and CRV can be withdrawn with this function.
-    function withdraw(address _to, address _asset)
-        external
-        override
-        onlyRole(STRATEGIST_ROLE)
-    {
+    function withdraw(
+        address _to,
+        address _asset
+    ) external override onlyRole(STRATEGIST_ROLE) {
         require(_to != address(0), "INVALID_ADDRESS");
         require(address(strategyTokens.want) != _asset, "want");
         require(address(strategyTokens.pusd) != _asset, "pusd");
@@ -271,11 +267,10 @@ contract StrategyPUSDConvex is AccessControl, IStrategy {
     /// @notice Allows the controller to withdraw `want` tokens. Normally used with a vault withdrawal
     /// @param _to The address to send the tokens to
     /// @param _amount The amount of `want` tokens to withdraw
-    function withdraw(address _to, uint256 _amount)
-        external
-        override
-        onlyVault
-    {
+    function withdraw(
+        address _to,
+        uint256 _amount
+    ) external override onlyVault {
         ICurve _want = strategyTokens.want;
 
         uint256 balance = _want.balanceOf(address(this));
