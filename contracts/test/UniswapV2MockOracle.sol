@@ -12,6 +12,7 @@ contract UniswapV2MockOracle is IUniswapV2Oracle {
 
     function consultAndUpdateIfNecessary(address, uint256)
         external
+        view
         override
         returns (uint256)
     {
