@@ -42,7 +42,7 @@ contract TokenVesting is AccessControl {
         token = IERC20(_token);
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
     }
-    
+
     /// @notice Allows members of `VESTING_CONTROLLER_ROLE` to vest tokens
     /// @dev Emits a {NewBeneficiary} event
     /// @param beneficiary The beneficiary of the tokens
@@ -77,14 +77,22 @@ contract TokenVesting is AccessControl {
 
         token.safeTransferFrom(msg.sender, address(this), totalAllocation);
 
-        emit NewBeneficiary(beneficiary, totalAllocation, start, cliffDuration, duration);
+        emit NewBeneficiary(
+            beneficiary,
+            totalAllocation,
+            start,
+            cliffDuration,
+            duration
+        );
     }
 
     /// @notice Allows members of `DEFAULT_ADMIN_ROLE` to revoke tokens
     /// @dev All the unreleased tokens are sent to `msg.sender`
     /// Emits a {Revoked} event
     /// @param account The account to revoke tokens from
-    function revoke(address account) public virtual onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revoke(
+        address account
+    ) public virtual onlyRole(DEFAULT_ADMIN_ROLE) {
         VestingSchedule memory schedule = vestingSchedules[account];
         require(schedule.totalAllocation > 0, "Beneficiary doesn't exist");
 
@@ -121,25 +129,18 @@ contract TokenVesting is AccessControl {
     /// @notice Calculates the amount of releasable tokens for `account`
     /// @param account The address to check
     /// @return The amount of releasable tokens for `account`
-    function releasableAmount(address account)
-        public
-        view
-        virtual
-        returns (uint256)
-    {
+    function releasableAmount(
+        address account
+    ) public view virtual returns (uint256) {
         return vestedAmount(account) - vestingSchedules[account].released;
     }
 
-    
     /// @notice Calculates the amount of tokens that has already vested for `account`. Uses a linear vesting curve
     /// @param account The address to check
     /// @return The amount of tokens that has already vested for `account`
-    function vestedAmount(address account)
-        public
-        view
-        virtual
-        returns (uint256)
-    {
+    function vestedAmount(
+        address account
+    ) public view virtual returns (uint256) {
         return _vestingSchedule(vestingSchedules[account], block.timestamp);
     }
 
@@ -151,7 +152,10 @@ contract TokenVesting is AccessControl {
         VestingSchedule memory schedule,
         uint256 timestamp
     ) internal view virtual returns (uint256) {
-        if (schedule.duration == 0 || timestamp < schedule.start + schedule.cliffDuration) {
+        if (
+            schedule.duration == 0 ||
+            timestamp < schedule.start + schedule.cliffDuration
+        ) {
             return 0;
         } else if (timestamp > schedule.start + schedule.duration) {
             return schedule.totalAllocation;

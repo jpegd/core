@@ -29,13 +29,21 @@ contract Mock3CRVZap is I3CRVZap {
         uint256 _minMint
     ) external override returns (uint256) {
         if (_amounts[0] > 0) {
-            tokenIndexes[0].transferFrom(msg.sender, address(this), _amounts[0]);
+            tokenIndexes[0].transferFrom(
+                msg.sender,
+                address(this),
+                _amounts[0]
+            );
             tokenIndexes[0].approve(_pool, _amounts[0]);
         }
 
         for (uint256 i = 1; i < 4; i++) {
             if (_amounts[i] > 0) {
-                tokenIndexes[i].transferFrom(msg.sender, address(this), _amounts[i]);
+                tokenIndexes[i].transferFrom(
+                    msg.sender,
+                    address(this),
+                    _amounts[i]
+                );
             }
         }
 

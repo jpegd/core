@@ -155,15 +155,13 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
         _;
     }
 
-    receive() external payable {
-    }
+    receive() external payable {}
 
     /// @notice Allows the DAO to set the performance fee
     /// @param _performanceFee The new performance fee
-    function setPerformanceFee(Rate memory _performanceFee)
-        public
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setPerformanceFee(
+        Rate memory _performanceFee
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(
             _performanceFee.denominator != 0 &&
                 _performanceFee.denominator >= _performanceFee.numerator,
@@ -174,18 +172,14 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
 
     /// @notice Allows the DAO to set the ETH vault
     /// @param _vault The new ETH vault
-    function setETHVault(address _vault)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setETHVault(address _vault) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_vault != address(0), "INVALID_ETH_VAULT");
         strategyConfig.ethVault = IPETHVaultForDAO(_vault);
     }
 
-    function setFeeRecipient(address _newRecipient)
-        public
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setFeeRecipient(
+        address _newRecipient
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_newRecipient != address(0), "INVALID_FEE_RECIPIENT");
 
         feeRecipient = _newRecipient;
@@ -214,11 +208,10 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
 
     /// @notice Controller only function that allows to withdraw non-strategy tokens (e.g tokens sent accidentally).
     /// CVX and CRV can be withdrawn with this function.
-    function withdraw(address _to, address _asset)
-        external
-        override
-        onlyRole(STRATEGIST_ROLE)
-    {
+    function withdraw(
+        address _to,
+        address _asset
+    ) external override onlyRole(STRATEGIST_ROLE) {
         require(_to != address(0), "INVALID_ADDRESS");
         require(address(strategyTokens.want) != _asset, "want");
         require(address(strategyTokens.peth) != _asset, "peth");
@@ -230,11 +223,10 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
     /// @notice Allows the controller to withdraw `want` tokens. Normally used with a vault withdrawal
     /// @param _to The address to send the tokens to
     /// @param _amount The amount of `want` tokens to withdraw
-    function withdraw(address _to, uint256 _amount)
-        external
-        override
-        onlyVault
-    {
+    function withdraw(
+        address _to,
+        uint256 _amount
+    ) external override onlyVault {
         ICurve _want = strategyTokens.want;
 
         uint256 balance = _want.balanceOf(address(this));
@@ -265,7 +257,7 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
     /// @param minOutCurve The minimum amount of `want` tokens to receive
     function harvest(uint256 minOutCurve) external onlyRole(STRATEGIST_ROLE) {
         convexConfig.baseRewardPool.getReward(address(this), true);
-        
+
         uint256 ethBalance;
         //Prevent `Stack too deep` errors
         {
@@ -297,7 +289,6 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
 
             ethBalance = address(this).balance;
             require(ethBalance != 0, "NOOP");
-
         }
 
         StrategyConfig memory strategy = strategyConfig;
@@ -306,13 +297,15 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
         uint256 fee = (ethBalance * performanceFee.numerator) /
             performanceFee.denominator;
 
-        (bool success, bytes memory result) = feeRecipient.call{value: fee}("");
+        (bool success, bytes memory result) = feeRecipient.call{ value: fee }(
+            ""
+        );
         if (!success) {
             assembly {
                 revert(add(result, 32), mload(result))
             }
         }
-        
+
         unchecked {
             ethBalance -= fee;
         }
@@ -328,7 +321,7 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
         if (ethCurveBalance > pethCurveBalance) {
             //if there's more ETH than PETH in the pool, use ETH as collateral to mint PETH
             //and deposit it into the Curve pool
-            strategy.ethVault.deposit{value: ethBalance}();
+            strategy.ethVault.deposit{ value: ethBalance }();
 
             strategy.ethVault.borrow(ethBalance);
             liquidityAmounts[1 - _pethEth.ethIndex] = ethBalance;
@@ -337,7 +330,10 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
             liquidityAmounts[_pethEth.ethIndex] = ethBalance;
         }
 
-        _pethEth.lp.add_liquidity{value: liquidityAmounts[_pethEth.ethIndex]}(liquidityAmounts, minOutCurve);
+        _pethEth.lp.add_liquidity{ value: liquidityAmounts[_pethEth.ethIndex] }(
+            liquidityAmounts,
+            minOutCurve
+        );
 
         uint256 wantBalance = heldAssets();
 

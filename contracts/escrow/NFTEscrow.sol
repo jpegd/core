@@ -7,11 +7,10 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "../interfaces/IVaultHelper.sol";
 
 //inspired by https://github.com/thousandetherhomepage/ketherhomepage/blob/master/contracts/KetherNFT.sol
-/// @title FlashEscrow contract 
+/// @title FlashEscrow contract
 /// @notice This contract sends and receives non ERC721 NFTs
-/// @dev Deployed for each NFT, its address is calculated by {NFTEscrow} prior to it being deployed to allow atomic non ERC721 transfers 
+/// @dev Deployed for each NFT, its address is calculated by {NFTEscrow} prior to it being deployed to allow atomic non ERC721 transfers
 contract FlashEscrow {
-
     /// @dev The contract selfdestructs in the constructor, its only purpose is to perform one call to the `target` address using `payload` as the payload
     /// @param target The call recipient
     /// @param payload The payload to use for the call
@@ -43,11 +42,9 @@ abstract contract NFTEscrow is Initializable, IVaultHelper {
     /// @dev Computes the bytecode of the {FlashEscrow} instance to deploy
     /// @param _idx The index of the NFT that's going to be sent to the {FlashEscrow} instance
     /// @return The bytecode of the {FlashEscrow} instance relative to the NFT at index `_idx`
-    function _encodeFlashEscrow(uint256 _idx)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function _encodeFlashEscrow(
+        uint256 _idx
+    ) internal view returns (bytes memory) {
         return
             abi.encodePacked(
                 type(FlashEscrow).creationCode,
@@ -57,18 +54,16 @@ abstract contract NFTEscrow is Initializable, IVaultHelper {
 
     /// @dev Virtual function, should return the `payload` to use in {FlashEscrow}'s constructor
     /// @param _idx The index of the NFT that's going to be sent to the {FlashEscrow} instance
-    function _encodeFlashEscrowPayload(uint256 _idx)
-        internal
-        view
-        virtual
-        returns (bytes memory);
+    function _encodeFlashEscrowPayload(
+        uint256 _idx
+    ) internal view virtual returns (bytes memory);
 
     /// @dev Deploys a {FlashEscrow} instance relative to owner `_owner` and index `_idx`
     /// @param _owner The owner of the NFT at index `_idx`
-    /// @param _idx The index of the NFT owned by `_owner` 
+    /// @param _idx The index of the NFT owned by `_owner`
     function _executeTransfer(address _owner, uint256 _idx) internal {
         (bytes32 salt, ) = precompute(_owner, _idx);
-        new FlashEscrow{salt: salt}(
+        new FlashEscrow{ salt: salt }(
             nftContract,
             _encodeFlashEscrowPayload(_idx)
         );
@@ -80,11 +75,10 @@ abstract contract NFTEscrow is Initializable, IVaultHelper {
     /// @param _idx The index of the NFT owner by `_owner`
     /// @return salt The salt that's going to be used to deploy the {FlashEscrow} instance
     /// @return predictedAddress The address where the {FlashEscrow} instance relative to `_owner` and `_idx` will be deployed to
-    function precompute(address _owner, uint256 _idx)
-        public
-        view
-        returns (bytes32 salt, address predictedAddress)
-    {
+    function precompute(
+        address _owner,
+        uint256 _idx
+    ) public view returns (bytes32 salt, address predictedAddress) {
         require(
             _owner != address(this) && _owner != address(0),
             "NFTEscrow: invalid_owner"

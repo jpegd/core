@@ -7,13 +7,14 @@ import "./TestERC20.sol";
 import "../interfaces/ICurve.sol";
 
 contract MockCurvePool is TestERC20, ICurve {
-
     uint256 nextAmountOut;
     uint256 nextMintAmount;
     mapping(uint256 => IERC20) tokenIndexes;
 
-    constructor(string memory _name, string memory _symbol) TestERC20(_name, _symbol) {
-    }
+    constructor(
+        string memory _name,
+        string memory _symbol
+    ) TestERC20(_name, _symbol) {}
 
     receive() external payable {}
 
@@ -33,38 +34,69 @@ contract MockCurvePool is TestERC20, ICurve {
         return tokenIndexes[_idx].balanceOf(address(this));
     }
 
-    function exchange(uint256 _inputIndex, uint256 _outputIndex, uint256 _inputAmount, uint256 _minOut) external payable override returns (uint256) {
+    function exchange(
+        uint256 _inputIndex,
+        uint256 _outputIndex,
+        uint256 _inputAmount,
+        uint256 _minOut
+    ) external payable override returns (uint256) {
         require(nextAmountOut >= _minOut, "INSUFFICIENT_AMOUNT_OUT");
 
-        tokenIndexes[_inputIndex].transferFrom(msg.sender, address(this), _inputAmount);
+        tokenIndexes[_inputIndex].transferFrom(
+            msg.sender,
+            address(this),
+            _inputAmount
+        );
         tokenIndexes[_outputIndex].transfer(msg.sender, nextAmountOut);
 
         return nextAmountOut;
     }
-    function exchange(uint256 _inputIndex, uint256 _outputIndex, uint256 _inputAmount, uint256 _minOut, bool _useETH) external payable override returns (uint256) {
+
+    function exchange(
+        uint256 _inputIndex,
+        uint256 _outputIndex,
+        uint256 _inputAmount,
+        uint256 _minOut,
+        bool _useETH
+    ) external payable override returns (uint256) {
         require(nextAmountOut >= _minOut, "INSUFFICIENT_AMOUNT_OUT");
-        
-        tokenIndexes[_inputIndex].transferFrom(msg.sender, address(this), _inputAmount);
+
+        tokenIndexes[_inputIndex].transferFrom(
+            msg.sender,
+            address(this),
+            _inputAmount
+        );
         if (_useETH) {
-            (bool _success,) = msg.sender.call{ value: nextAmountOut }("");
+            (bool _success, ) = msg.sender.call{ value: nextAmountOut }("");
             require(_success, "INSUFFICIENT_ETH");
         } else {
-            tokenIndexes[_outputIndex].transfer(msg.sender, nextAmountOut);  
+            tokenIndexes[_outputIndex].transfer(msg.sender, nextAmountOut);
         }
 
         return nextAmountOut;
     }
 
-    function add_liquidity(uint256[2] calldata _amounts, uint256 _minMintAmount) external payable override returns (uint256) {
+    function add_liquidity(
+        uint256[2] calldata _amounts,
+        uint256 _minMintAmount
+    ) external payable override returns (uint256) {
         require(nextMintAmount >= _minMintAmount, "INSUFFICIENT_MINT_AMOUNT");
 
         if (_amounts[0] > 0) {
             if (_amounts[0] != msg.value)
-                tokenIndexes[0].transferFrom(msg.sender, address(this), _amounts[0]);
+                tokenIndexes[0].transferFrom(
+                    msg.sender,
+                    address(this),
+                    _amounts[0]
+                );
         }
         if (_amounts[1] > 0) {
             if (_amounts[1] != msg.value)
-                tokenIndexes[1].transferFrom(msg.sender, address(this), _amounts[1]);
+                tokenIndexes[1].transferFrom(
+                    msg.sender,
+                    address(this),
+                    _amounts[1]
+                );
         }
 
         _mint(msg.sender, nextMintAmount);

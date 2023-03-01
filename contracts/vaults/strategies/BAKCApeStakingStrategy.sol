@@ -55,21 +55,16 @@ contract BAKCApeStakingStrategy is
         return Kind.STANDARD;
     }
 
-    function depositAddress(address _account)
-        external
-        view
-        override
-        returns (address)
-    {
+    function depositAddress(
+        address _account
+    ) external view override returns (address) {
         return MAIN_STRATEGY.depositAddress(_account);
     }
 
-    function isDeposited(address, uint256 _nftIndex)
-        external
-        view
-        override
-        returns (bool)
-    {
+    function isDeposited(
+        address,
+        uint256 _nftIndex
+    ) external view override returns (bool) {
         return depositedNFTs[_nftIndex];
     }
 
@@ -230,9 +225,10 @@ contract BAKCApeStakingStrategy is
     /// Reverts if called for a non legacy deposit
     /// @param _nfts The NFTs to withdraw
     /// @param _recipient The address to send the NFTs (and apecoin tokens, if any) to
-    function withdrawNFTs(uint256[] calldata _nfts, address _recipient)
-        external
-    {
+    function withdrawNFTs(
+        uint256[] calldata _nfts,
+        address _recipient
+    ) external {
         uint256 _length = _nfts.length;
 
         if (_length == 0) revert InvalidLength();

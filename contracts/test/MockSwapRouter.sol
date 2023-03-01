@@ -11,24 +11,33 @@ contract MockSwapRouter is ISwapRouter {
         nextAmountOut = _next;
     }
 
-    function exactInput(ExactInputParams calldata _params)
-        external override
-        returns (uint256) {
-            require(nextAmountOut >= _params.amountOutMinimum, "INSUFFICIENT_AMOUNT_OUT");
-            
-            bytes memory _path = _params.path;
-           
-            IERC20 _inputToken;
-            IERC20 _outputToken;
-            
-            assembly {
-                _inputToken := div(mload(add(_path, 0x20)), 0x1000000000000000000000000)
-                _outputToken := div(mload(add(add(_path, 0x20), 0x17)), 0x1000000000000000000000000)
-            }
+    function exactInput(
+        ExactInputParams calldata _params
+    ) external override returns (uint256) {
+        require(
+            nextAmountOut >= _params.amountOutMinimum,
+            "INSUFFICIENT_AMOUNT_OUT"
+        );
 
-            _inputToken.transferFrom(msg.sender, address(this), _params.amountIn);
-            _outputToken.transfer(_params.recipient, nextAmountOut);
+        bytes memory _path = _params.path;
 
-            return nextAmountOut;
+        IERC20 _inputToken;
+        IERC20 _outputToken;
+
+        assembly {
+            _inputToken := div(
+                mload(add(_path, 0x20)),
+                0x1000000000000000000000000
+            )
+            _outputToken := div(
+                mload(add(add(_path, 0x20), 0x17)),
+                0x1000000000000000000000000
+            )
         }
+
+        _inputToken.transferFrom(msg.sender, address(this), _params.amountIn);
+        _outputToken.transfer(_params.recipient, nextAmountOut);
+
+        return nextAmountOut;
+    }
 }

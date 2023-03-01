@@ -257,10 +257,10 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows users to deposit a card and bid on an auction.
     /// @param _auctionIndex The auction to bid on.
     /// @param _idx The index of the card to deposit.
-    function depositCardAndBid(uint256 _auctionIndex, uint256 _idx)
-        external
-        payable
-    {
+    function depositCardAndBid(
+        uint256 _auctionIndex,
+        uint256 _idx
+    ) external payable {
         depositCard(_idx);
         bid(_auctionIndex);
     }
@@ -278,7 +278,7 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         auction.bids[msg.sender] = 0;
         assert(userAuctions[msg.sender].remove(_auctionIndex));
 
-        (bool sent, ) = payable(msg.sender).call{value: bidAmount}("");
+        (bool sent, ) = payable(msg.sender).call{ value: bidAmount }("");
         require(sent, "ETH_TRANSFER_FAILED");
 
         emit BidWithdrawn(_auctionIndex, msg.sender, bidAmount);
@@ -350,22 +350,19 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @return The list of active bids for an account.
     /// @param _account The address to check.
-    function getActiveBids(address _account)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function getActiveBids(
+        address _account
+    ) external view returns (uint256[] memory) {
         return userAuctions[_account].values();
     }
 
     /// @return The active bid of an account for an auction.
     /// @param _auctionIndex The auction to retrieve the bid from.
     /// @param _account The bidder's account
-    function getAuctionBid(uint256 _auctionIndex, address _account)
-        external
-        view
-        returns (uint256)
-    {
+    function getAuctionBid(
+        uint256 _auctionIndex,
+        address _account
+    ) external view returns (uint256) {
         return auctions[_auctionIndex].bids[_account];
     }
 
@@ -408,10 +405,9 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the owner to add accounts that are staking in the legacy contract
     /// @param _accounts The accounts to add
-    function addLegacyAccounts(address[] calldata _accounts)
-        external
-        onlyOwner
-    {
+    function addLegacyAccounts(
+        address[] calldata _accounts
+    ) external onlyOwner {
         for (uint256 i; i < _accounts.length; ++i) {
             address account = _accounts[i];
             require(
@@ -455,10 +451,9 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice Allows the owner to set the minimum increment rate from the last highest bid.
     /// @param _newIncrementRate The new increment rate.
-    function setMinimumIncrementRate(Rate memory _newIncrementRate)
-        public
-        onlyOwner
-    {
+    function setMinimumIncrementRate(
+        Rate memory _newIncrementRate
+    ) public onlyOwner {
         require(
             _newIncrementRate.denominator != 0 &&
                 _newIncrementRate.denominator >= _newIncrementRate.numerator,

@@ -26,16 +26,9 @@ contract EtherRock {
         rocks[0].currentlyForSale = true;
     }
 
-    function getRockInfo(uint256 rockNumber)
-        external
-        view
-        returns (
-            address,
-            bool,
-            uint256,
-            uint256
-        )
-    {
+    function getRockInfo(
+        uint256 rockNumber
+    ) external view returns (address, bool, uint256, uint256) {
         return (
             rocks[rockNumber].owner,
             rocks[rockNumber].currentlyForSale,
@@ -44,11 +37,9 @@ contract EtherRock {
         );
     }
 
-    function rockOwningHistory(address _address)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function rockOwningHistory(
+        address _address
+    ) external view returns (uint256[] memory) {
         return rockOwners[_address];
     }
 

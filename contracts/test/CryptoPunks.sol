@@ -169,9 +169,10 @@ contract CryptoPunks {
         emit PunkNoLongerForSale(punkIndex);
     }
 
-    function offerPunkForSale(uint256 punkIndex, uint256 minSalePriceInWei)
-        external
-    {
+    function offerPunkForSale(
+        uint256 punkIndex,
+        uint256 minSalePriceInWei
+    ) external {
         //if (!allPunksAssigned) revert();
         if (punkIndexToAddress[punkIndex] != msg.sender) revert();
         if (punkIndex >= 10000) revert();

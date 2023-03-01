@@ -6,15 +6,14 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "../escrow/NFTEscrow.sol";
 import "../interfaces/IEtherRocks.sol";
 
- /// @title EtherRocks NFTVault helper contract
- /// @notice Allows compatibility between EtherRocks and {NFTVault}
- /// @dev EtherRocks IERC721 compatibility.
- /// Meant to only be used by {NFTVault}.
- /// This contract is NOT an ERC721 wrapper for rocks and is not meant to implement the ERC721 interface fully, 
- /// its only purpose is to serve as a proxy between {NFTVault} and EtherRocks.
- /// The owner is {NFTVault}
+/// @title EtherRocks NFTVault helper contract
+/// @notice Allows compatibility between EtherRocks and {NFTVault}
+/// @dev EtherRocks IERC721 compatibility.
+/// Meant to only be used by {NFTVault}.
+/// This contract is NOT an ERC721 wrapper for rocks and is not meant to implement the ERC721 interface fully,
+/// its only purpose is to serve as a proxy between {NFTVault} and EtherRocks.
+/// The owner is {NFTVault}
 contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
-
     /// @param rocksAddress Address of the EtherRocks contract
     function initialize(address rocksAddress) external initializer {
         __NFTEscrow_init(rocksAddress);
@@ -25,8 +24,8 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
     /// @dev If the owner of the rock is this contract we return the address of the {NFTVault} for compatibility
     /// @param _idx The rock index
     /// @return The owner of the rock if != `address(this)`, otherwise the the owner of this contract
-    function ownerOf(uint256 _idx) external override view returns (address) {
-        (address account,,,) = IEtherRocks(nftContract).getRockInfo(_idx);
+    function ownerOf(uint256 _idx) external view override returns (address) {
+        (address account, , , ) = IEtherRocks(nftContract).getRockInfo(_idx);
 
         return account == address(this) ? owner() : account;
     }
@@ -61,7 +60,7 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
     function rescueNFT(uint256 _idx) external override {
         IEtherRocks rocks = IEtherRocks(nftContract);
         (, address predictedAddress) = precompute(msg.sender, _idx);
-        (address owner,,,) = rocks.getRockInfo(_idx);
+        (address owner, , , ) = rocks.getRockInfo(_idx);
         require(owner == predictedAddress, "NOT_OWNER");
         assert(owner != address(this)); //this should never happen
 
@@ -74,21 +73,17 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
     /// @param _from The sender address
     /// @param _to The recipient address
     /// @param _idx The index of the rock to transfer
-    function _transferFrom(
-        address _from,
-        address _to,
-        uint256 _idx
-    ) internal {
+    function _transferFrom(address _from, address _to, uint256 _idx) internal {
         IEtherRocks rocks = IEtherRocks(nftContract);
 
-        (address account,,,) = rocks.getRockInfo(_idx);
+        (address account, , , ) = rocks.getRockInfo(_idx);
 
         //if the owner is this address we don't need to go through {NFTEscrow}
         if (account != address(this)) {
             _executeTransfer(_from, _idx);
         }
 
-        (address newOwner,,,) = rocks.getRockInfo(_idx);
+        (address newOwner, , , ) = rocks.getRockInfo(_idx);
 
         assert(
             newOwner == address(this) //this should never be false
@@ -109,12 +104,9 @@ contract EtherRocksHelper is NFTEscrow, OwnableUpgradeable {
 
     /// @dev The {giftRock} function is used as the escrow's payload.
     /// @param _idx The index of the rock that's going to be transferred using {NFTEscrow}
-    function _encodeFlashEscrowPayload(uint256 _idx)
-        internal
-        view
-        override
-        returns (bytes memory)
-    {
+    function _encodeFlashEscrowPayload(
+        uint256 _idx
+    ) internal view override returns (bytes memory) {
         return
             abi.encodeWithSignature(
                 "giftRock(uint256,address)",

@@ -15,7 +15,11 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
     using SafeERC20Upgradeable for ERC20Upgradeable;
 
     event Deposit(address indexed from, address indexed to, uint256 value);
-    event Withdrawal(address indexed withdrawer, address indexed to, uint256 wantAmount);
+    event Withdrawal(
+        address indexed withdrawer,
+        address indexed to,
+        uint256 wantAmount
+    );
     event StrategyMigrated(
         IStrategy indexed newStrategy,
         IStrategy indexed oldStrategy
@@ -75,18 +79,16 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
     function exchangeRate() external view returns (uint256) {
         uint256 supply = totalSupply();
         if (supply == 0) return 0;
-        return (totalAssets() * (10**decimals())) / supply;
+        return (totalAssets() * (10 ** decimals())) / supply;
     }
 
     /// @notice Allows users to deposit `token`. Contracts can't call this function
     /// @param _to The address to send the tokens to
     /// @param _amount The amount to deposit
-    function deposit(address _to, uint256 _amount)
-        external
-        noContract
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    function deposit(
+        address _to,
+        uint256 _amount
+    ) external noContract whenNotPaused returns (uint256 shares) {
         require(_amount != 0, "INVALID_AMOUNT");
 
         IStrategy _strategy = strategy;
@@ -138,12 +140,10 @@ contract Vault is ERC20PausableUpgradeable, NoContractUpgradeable {
     /// @notice Allows users to withdraw tokens. Contracts can't call this function
     /// @param _to The address to send the tokens to
     /// @param _shares The amount of shares to burn
-    function withdraw(address _to, uint256 _shares)
-        external
-        noContract
-        whenNotPaused
-        returns (uint256 backingTokens)
-    {
+    function withdraw(
+        address _to,
+        uint256 _shares
+    ) external noContract whenNotPaused returns (uint256 backingTokens) {
         require(_shares != 0, "INVALID_AMOUNT");
 
         uint256 supply = totalSupply();

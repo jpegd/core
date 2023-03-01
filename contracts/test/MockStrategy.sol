@@ -9,10 +9,7 @@ contract MockStrategy is IStrategy {
     address public want;
     address public baseRewardPool;
 
-    constructor(
-        address _want,
-        address _baseRewardPool
-    ) {
+    constructor(address _want, address _baseRewardPool) {
         want = _want;
         baseRewardPool = _baseRewardPool;
     }
@@ -21,10 +18,7 @@ contract MockStrategy is IStrategy {
 
     function withdraw(address to, address token) external override {
         uint256 balance = IERC20(token).balanceOf(address(this));
-        IERC20(token).transfer(
-            to,
-            balance
-        );
+        IERC20(token).transfer(to, balance);
     }
 
     function withdraw(address to, uint256 amount) external override {

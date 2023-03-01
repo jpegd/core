@@ -84,10 +84,8 @@ contract LPFarming is ReentrancyGuard, NoContract {
         uint256 _endBlock,
         uint256 _rewardPerBlock
     ) external onlyOwner {
-        if (_startBlock == 0)
-            _startBlock = block.number;
-        else
-            require(_startBlock >= block.number, "Invalid start block");
+        if (_startBlock == 0) _startBlock = block.number;
+        else require(_startBlock >= block.number, "Invalid start block");
         require(_endBlock > _startBlock, "Invalid end block");
         require(_rewardPerBlock != 0, "Invalid reward per block");
 
@@ -159,11 +157,10 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @param _pid The pool id
     /// @param _user The address of the user
     /// @return The amount of rewards claimable from `_pid` by user `_user`
-    function pendingReward(uint256 _pid, address _user)
-        external
-        view
-        returns (uint256)
-    {
+    function pendingReward(
+        uint256 _pid,
+        address _user
+    ) external view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accRewardPerShare = pool.accRewardPerShare;
@@ -245,11 +242,9 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// `blockNumber` is 1100, the epoch's `endBlock` is 1000. In this case the function would return 1000. If this value were to be used
     /// in the {_updatePool} function, where the pool's `lastRewardBlock` is 990, only the rewards from block 990 to block 1000 would be distributed
     /// @return Normalized `blockNumber`
-    function _normalizeBlockNumber(uint256 blockNumber)
-        internal
-        view
-        returns (uint256)
-    {
+    function _normalizeBlockNumber(
+        uint256 blockNumber
+    ) internal view returns (uint256) {
         if (blockNumber < epoch.startBlock) return epoch.startBlock;
 
         if (blockNumber > epoch.endBlock) return epoch.endBlock;

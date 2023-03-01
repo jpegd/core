@@ -6,13 +6,9 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 /// @title JPEG - Governance token
 contract JPEG is ERC20Votes, AccessControl {
-
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
-    constructor(uint256 totalSupply)
-        ERC20("JPEG", "JPEG")
-        ERC20Permit("JPEG")
-    {
+    constructor(uint256 totalSupply) ERC20("JPEG", "JPEG") ERC20Permit("JPEG") {
         _mint(msg.sender, totalSupply);
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
     }

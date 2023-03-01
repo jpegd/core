@@ -1,3 +1,3 @@
 module.exports = {
-  skipFiles: ["test", "interfaces", "libraries", "draft"],
+    skipFiles: ["test", "interfaces", "libraries", "draft"]
 };

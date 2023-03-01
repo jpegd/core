@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../interfaces/IBooster.sol";
 
 contract MockBooster is IBooster {
-
     address rewardPool;
     mapping(uint256 => IERC20) pidToken;
 
@@ -24,5 +23,4 @@ contract MockBooster is IBooster {
     function setPidToken(uint256 _pid, IERC20 _token) external {
         pidToken[_pid] = _token;
     }
-
 }

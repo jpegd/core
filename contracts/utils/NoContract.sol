@@ -4,7 +4,6 @@ pragma solidity ^0.8.4;
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 abstract contract NoContract is Ownable {
-
     event ContractWhitelistChanged(address indexed addr, bool isWhitelisted);
 
     /// @notice Contracts that are allowed to interact with functions executing the {noContract} modifier.
@@ -23,13 +22,12 @@ abstract contract NoContract is Ownable {
     /// @notice Allows the owner to whitelist/blacklist contracts
     /// @param addr The contract address to whitelist/blacklist
     /// @param isWhitelisted Whereter to whitelist or blacklist `_contract`
-    function setContractWhitelisted(address addr, bool isWhitelisted)
-        external
-        onlyOwner
-    {
+    function setContractWhitelisted(
+        address addr,
+        bool isWhitelisted
+    ) external onlyOwner {
         whitelistedContracts[addr] = isWhitelisted;
 
         emit ContractWhitelistChanged(addr, isWhitelisted);
     }
-
 }

@@ -24,9 +24,7 @@ contract UniswapV2Oracle {
     FixedPoint.uq112x112 public price0Average;
     FixedPoint.uq112x112 public price1Average;
 
-    constructor(
-        IUniswapV2Pair _pair
-    ) {
+    constructor(IUniswapV2Pair _pair) {
         pair = _pair;
         token0 = _pair.token0();
         token1 = _pair.token1();
@@ -63,10 +61,10 @@ contract UniswapV2Oracle {
         blockTimestampLast = blockTimestamp;
     }
 
-    function consultAndUpdateIfNecessary(address token, uint256 amountIn)
-        external
-        returns (uint256)
-    {
+    function consultAndUpdateIfNecessary(
+        address token,
+        uint256 amountIn
+    ) external returns (uint256) {
         (
             uint256 price0Cumulative,
             uint256 price1Cumulative,
@@ -107,11 +105,10 @@ contract UniswapV2Oracle {
     }
 
     // note this will always return 0 before update has been called successfully for the first time.
-    function consult(address token, uint256 amountIn)
-        external
-        view
-        returns (uint256 amountOut)
-    {
+    function consult(
+        address token,
+        uint256 amountIn
+    ) external view returns (uint256 amountOut) {
         if (token == token0) {
             amountOut = price0Average.mul(amountIn).decode144();
         } else {
@@ -120,11 +117,10 @@ contract UniswapV2Oracle {
         }
     }
 
-    function consultUpdated(address token, uint256 amountIn)
-        external
-        view
-        returns (uint256 amountOut)
-    {
+    function consultUpdated(
+        address token,
+        uint256 amountIn
+    ) external view returns (uint256 amountOut) {
         if (blockTimestampLast == 0) return 0;
 
         (
@@ -152,10 +148,9 @@ contract UniswapV2Oracle {
                 );
             }
         } else {
-            if (token == token0)
-                priceAvg = price0Average;
+            if (token == token0) priceAvg = price0Average;
             else {
-                require(token == token1, "INVALID_TOKEN");     
+                require(token == token1, "INVALID_TOKEN");
                 priceAvg = price1Average;
             }
         }

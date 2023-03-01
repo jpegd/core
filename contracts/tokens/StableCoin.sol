@@ -7,12 +7,12 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 
- /// @title PUSD - JPEG'd Stablecoin
- /// @notice PUSD is minted by the {NFTVault} (backed by NFTs) and the {AssetVaultForDAO} (backed by fungible assets)
- /// @dev Roles (at launch)
- /// DEFAULT_ADMIN_ROLE: DAO
- /// MINTER_ROLE: Vaults ({AssetVaultForDAO} and {NFTVault})
- /// PAUSER_ROLE: None
+/// @title PUSD - JPEG'd Stablecoin
+/// @notice PUSD is minted by the {NFTVault} (backed by NFTs) and the {AssetVaultForDAO} (backed by fungible assets)
+/// @dev Roles (at launch)
+/// DEFAULT_ADMIN_ROLE: DAO
+/// MINTER_ROLE: Vaults ({AssetVaultForDAO} and {NFTVault})
+/// PAUSER_ROLE: None
 contract StableCoin is
     Context,
     AccessControlEnumerable,

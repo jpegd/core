@@ -13,9 +13,7 @@ contract JPEGAirdrop is PreJPEG {
     using SafeERC20 for IERC20;
 
     /// @param _jpeg The token to vest
-    constructor(address _jpeg)
-        PreJPEG(_jpeg)
-    {}
+    constructor(address _jpeg) PreJPEG(_jpeg) {}
 
     /// @inheritdoc ERC20
     /// @dev This function is overridden since {PreJPEG} has its name
@@ -64,7 +62,12 @@ contract JPEGAirdrop is PreJPEG {
 
         _mint(beneficiary, totalAllocation);
 
-        emit NewBeneficiary(beneficiary, totalAllocation, start, cliffDuration, duration);
+        emit NewBeneficiary(
+            beneficiary,
+            totalAllocation,
+            start,
+            cliffDuration,
+            duration
+        );
     }
-
 }
