@@ -57,6 +57,7 @@ interface INFTVault {
     function hasStrategy(address _strategy) external view returns (bool);
 
     function stablecoin() external view returns (address);
+
     function nftContract() external view returns (address);
 
     function positions(uint256 _idx) external view returns (Position memory);

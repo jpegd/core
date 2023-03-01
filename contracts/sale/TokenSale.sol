@@ -178,8 +178,9 @@ contract TokenSale is Ownable, ReentrancyGuard {
             address token = supportedTokens[i];
             SupportedToken storage tokenData = supportedTokensData[token];
 
-            (,int256 answer,,uint256 timestamp,) = IAggregatorV3Interface(tokenData.oracle)
-                .latestRoundData();
+            (, int256 answer, , uint256 timestamp, ) = IAggregatorV3Interface(
+                tokenData.oracle
+            ).latestRoundData();
 
             require(timestamp != 0, "ROUND_INCOMPLETE");
             require(answer > 0, "INVALID_ORACLE_ANSWER");
@@ -188,7 +189,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
 
             value +=
                 (tokenData.totalRaised * convertedAnswer) /
-                10**ERC20(token).decimals(); //Chainlink USD prices are always to 8
+                10 ** ERC20(token).decimals(); //Chainlink USD prices are always to 8
             tokenData.USDPrice = convertedAnswer;
         }
 
@@ -226,7 +227,7 @@ contract TokenSale is Ownable, ReentrancyGuard {
     function depositETH() public payable nonReentrant {
         address _weth = WETH;
         _depositFor(msg.sender, _weth, msg.value);
-        IWETH(_weth).deposit{value: msg.value}();
+        IWETH(_weth).deposit{ value: msg.value }();
     }
 
     /// @notice Token deposit function (WETH/USDC, not ETH). Users can deposit more than once, but only using the same token
@@ -260,7 +261,11 @@ contract TokenSale is Ownable, ReentrancyGuard {
 
     /// @notice View function to get all the oracles used by this contract
     /// @return oracles Array containing all oracle addresses
-    function getTokenOracles() external view returns (address[] memory oracles) {
+    function getTokenOracles()
+        external
+        view
+        returns (address[] memory oracles)
+    {
         oracles = new address[](supportedTokens.length);
         for (uint256 i; i < supportedTokens.length; ++i) {
             oracles[i] = supportedTokensData[supportedTokens[i]].oracle;
@@ -277,17 +282,17 @@ contract TokenSale is Ownable, ReentrancyGuard {
     /// @dev Returns a meaningful result only after the sale has been finalized, otherwise it returns 0
     /// @param _user The user address
     /// @return The amount of tokens claimable by `_user`
-    function getUserClaimableTokens(address _user) public view returns (uint256) {
+    function getUserClaimableTokens(
+        address _user
+    ) public view returns (uint256) {
         Account memory account = userAccounts[_user];
-        
-        if (account.depositedAmount == 0)
-            return 0;
+
+        if (account.depositedAmount == 0) return 0;
 
         uint256 totalRaise = totalRaisedUSD;
         //if sale hasn't been finalized yet
-        if (totalRaise == 0)
-            return 0;
-        
+        if (totalRaise == 0) return 0;
+
         //calculates the dollar value of the amount of tokens deposited by msg.sender, multiplied by `account.token`'s decimals for additional precision
         uint256 depositedValueWithPrecision = supportedTokensData[account.token]
             .USDPrice * account.depositedAmount;
@@ -295,10 +300,11 @@ contract TokenSale is Ownable, ReentrancyGuard {
         //the total available tokens:
         //user share = user deposited value / total deposited value
         //user tokens = user share * total tokens
-        return (depositedValueWithPrecision * availableTokens) /
+        return
+            (depositedValueWithPrecision * availableTokens) /
             totalRaise /
             //remove `account.token`'s decimals
-            10**ERC20(account.token).decimals();
+            10 ** ERC20(account.token).decimals();
     }
 
     /// @dev Deposit logic. Called by `deposit` and `depositETH`

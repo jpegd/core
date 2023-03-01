@@ -19,10 +19,10 @@ interface IUniswapV2Pair {
 
     function balanceOf(address owner) external view returns (uint256);
 
-    function allowance(address owner, address spender)
-        external
-        view
-        returns (uint256);
+    function allowance(
+        address owner,
+        address spender
+    ) external view returns (uint256);
 
     function approve(address spender, uint256 value) external returns (bool);
 
@@ -78,11 +78,7 @@ interface IUniswapV2Pair {
     function getReserves()
         external
         view
-        returns (
-            uint112 reserve0,
-            uint112 reserve1,
-            uint32 blockTimestampLast
-        );
+        returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
 
     function price0CumulativeLast() external view returns (uint256);
 
@@ -92,9 +88,9 @@ interface IUniswapV2Pair {
 
     function mint(address to) external returns (uint256 liquidity);
 
-    function burn(address to)
-        external
-        returns (uint256 amount0, uint256 amount1);
+    function burn(
+        address to
+    ) external returns (uint256 amount0, uint256 amount1);
 
     function swap(
         uint256 amount0Out,

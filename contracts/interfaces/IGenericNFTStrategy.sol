@@ -8,5 +8,6 @@ interface IGenericNFTStrategy {
     }
 
     function kind() external view returns (Kind);
+
     function depositAddress(address _account) external view returns (address);
 }

@@ -37,9 +37,7 @@ contract PETHVaultForDAO is
     uint256 public debtAmount;
 
     /// @param _stablecoin PETH address
-    function initialize(
-        IStableCoin _stablecoin
-    ) external initializer {
+    function initialize(IStableCoin _stablecoin) external initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
 
@@ -54,11 +52,7 @@ contract PETHVaultForDAO is
 
     /// @notice Allows members of the `WHITELISTED_ROLE` to deposit ETH
     /// @dev Emits a {Deposit} event
-    function deposit()
-        public
-        payable
-        onlyRole(WHITELISTED_ROLE)
-    {
+    function deposit() public payable onlyRole(WHITELISTED_ROLE) {
         require(msg.value != 0, "invalid_value");
 
         emit Deposit(msg.sender, msg.value);
@@ -67,11 +61,9 @@ contract PETHVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to borrow `amount` of PETH against the deposited ETH
     /// @dev Emits a {Borrow} event
     /// @param amount The amount of PETH to borrow
-    function borrow(uint256 amount)
-        external
-        onlyRole(WHITELISTED_ROLE)
-        nonReentrant
-    {
+    function borrow(
+        uint256 amount
+    ) external onlyRole(WHITELISTED_ROLE) nonReentrant {
         require(amount != 0, "invalid_amount");
 
         uint256 collateral = address(this).balance;
@@ -87,11 +79,9 @@ contract PETHVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to repay `amount` of debt using PETH
     /// @dev Emits a {Repay} event
     /// @param amount The amount of debt to repay
-    function repay(uint256 amount)
-        external
-        onlyRole(WHITELISTED_ROLE)
-        nonReentrant
-    {
+    function repay(
+        uint256 amount
+    ) external onlyRole(WHITELISTED_ROLE) nonReentrant {
         require(amount != 0, "invalid_amount");
 
         amount = amount > debtAmount ? debtAmount : amount;
@@ -107,15 +97,16 @@ contract PETHVaultForDAO is
     /// @notice Allows members of the `WHITELISTED_ROLE` to withdraw `amount` of deposited collateral
     /// @dev Emits a {Withdraw} event
     /// @param amount The amount of collateral to withdraw
-    function withdraw(uint256 amount)
-        external
-        onlyRole(WHITELISTED_ROLE)
-        nonReentrant
-    {
+    function withdraw(
+        uint256 amount
+    ) external onlyRole(WHITELISTED_ROLE) nonReentrant {
         uint256 collateral = address(this).balance;
-        require(amount != 0 && amount <= collateral - debtAmount, "invalid_amount");
-        
-        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(
+            amount != 0 && amount <= collateral - debtAmount,
+            "invalid_amount"
+        );
+
+        (bool sent, ) = payable(msg.sender).call{ value: amount }("");
         require(sent, "eth_transfer_failed");
 
         emit Withdraw(msg.sender, amount);

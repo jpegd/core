@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.4;
 
-interface ITokenVesting  {
+interface ITokenVesting {
     /// @notice Allows members of `VESTING_CONTROLLER_ROLE` to vest tokens
     /// @dev Emits a {NewBeneficiary} event
     /// @param beneficiary The beneficiary of the tokens

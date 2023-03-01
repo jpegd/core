@@ -24,24 +24,26 @@ contract MockRewardPool is IBaseRewardPool {
         withdrawAndUnwrap(balanceOf(address(0)), claim);
     }
 
-    function withdrawAndUnwrap(uint256 amount, bool claim)
-        public
-        override
-        returns (bool)
-    {
+    function withdrawAndUnwrap(
+        uint256 amount,
+        bool claim
+    ) public override returns (bool) {
         poolToken.transfer(msg.sender, amount);
         if (claim) getReward(msg.sender, true);
         return true;
     }
 
-    function getReward(address recipient, bool claimExtras) public override returns (bool) {
-        IERC20(rewardToken).transfer(recipient, IERC20(rewardToken).balanceOf(address(this)));
+    function getReward(
+        address recipient,
+        bool claimExtras
+    ) public override returns (bool) {
+        IERC20(rewardToken).transfer(
+            recipient,
+            IERC20(rewardToken).balanceOf(address(this))
+        );
         if (claimExtras) {
             for (uint256 i = 0; i < extraRewards.length; i++) {
-                IBaseRewardPool(extraRewards[i]).getReward(
-                    recipient,
-                    true
-                );
+                IBaseRewardPool(extraRewards[i]).getReward(recipient, true);
             }
         }
 
@@ -60,5 +62,5 @@ contract MockRewardPool is IBaseRewardPool {
         return IERC20(rewardToken).balanceOf(address(this));
     }
 
-    function donate(uint256 _amount) external override returns(bool) {}
+    function donate(uint256 _amount) external override returns (bool) {}
 }

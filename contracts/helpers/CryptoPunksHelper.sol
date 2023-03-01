@@ -6,15 +6,14 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "../escrow/NFTEscrow.sol";
 import "../interfaces/ICryptoPunks.sol";
 
- /// @title CryptoPunks NFTVault helper contract
- /// @notice Allows compatibility between CryptoPunks and {NFTVault}
- /// @dev CryptoPunks IERC721 compatibility.
- /// Meant to only be used by {NFTVault}.
- /// This contract is NOT an ERC721 wrapper for punks and is not meant to implement the ERC721 interface fully, 
- /// its only purpose is to serve as a proxy between {NFTVault} and CryptoPunks.
- /// The owner is {NFTVault}
+/// @title CryptoPunks NFTVault helper contract
+/// @notice Allows compatibility between CryptoPunks and {NFTVault}
+/// @dev CryptoPunks IERC721 compatibility.
+/// Meant to only be used by {NFTVault}.
+/// This contract is NOT an ERC721 wrapper for punks and is not meant to implement the ERC721 interface fully,
+/// its only purpose is to serve as a proxy between {NFTVault} and CryptoPunks.
+/// The owner is {NFTVault}
 contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
-
     /// @param punksAddress Address of the CryptoPunks contract
     function initialize(address punksAddress) external initializer {
         __NFTEscrow_init(punksAddress);
@@ -60,7 +59,7 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
     /// @inheritdoc NFTEscrow
     function rescueNFT(uint256 _idx) external override {
         ICryptoPunks punks = ICryptoPunks(nftContract);
-        
+
         (, address predictedAddress) = precompute(msg.sender, _idx);
         address owner = punks.punkIndexToAddress(_idx);
         require(owner == predictedAddress, "NOT_OWNER");
@@ -75,11 +74,7 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
     /// @param _from The sender address
     /// @param _to The recipient address
     /// @param _idx The index of the punk to transfer
-    function _transferFrom(
-        address _from,
-        address _to,
-        uint256 _idx
-    ) internal {
+    function _transferFrom(address _from, address _to, uint256 _idx) internal {
         ICryptoPunks punks = ICryptoPunks(nftContract);
 
         address account = punks.punkIndexToAddress(_idx);
@@ -105,12 +100,9 @@ contract CryptoPunksHelper is NFTEscrow, OwnableUpgradeable {
 
     /// @dev The {transferPunk} function is used as the escrow's payload.
     /// @param _idx The index of the punk that's going to be transferred using {NFTEscrow}
-    function _encodeFlashEscrowPayload(uint256 _idx)
-        internal
-        view
-        override
-        returns (bytes memory)
-    {
+    function _encodeFlashEscrowPayload(
+        uint256 _idx
+    ) internal view override returns (bytes memory) {
         return
             abi.encodeWithSignature(
                 "transferPunk(address,uint256)",

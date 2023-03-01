@@ -74,12 +74,9 @@ abstract contract AbstractApeStakingStrategy is
     }
 
     /// @return The user proxy address for `_account`
-    function depositAddress(address _account)
-        public
-        view
-        override
-        returns (address)
-    {
+    function depositAddress(
+        address _account
+    ) public view override returns (address) {
         return
             ClonesUpgradeable.predictDeterministicAddress(
                 clonesImplementation,
@@ -87,12 +84,10 @@ abstract contract AbstractApeStakingStrategy is
             );
     }
 
-    function isDeposited(address _owner, uint256 _nftIndex)
-        external
-        view
-        override
-        returns (bool)
-    {
+    function isDeposited(
+        address _owner,
+        uint256 _nftIndex
+    ) external view override returns (bool) {
         return
             IERC721Upgradeable(mainNftContract).ownerOf(_nftIndex) ==
             ClonesUpgradeable.predictDeterministicAddress(
@@ -149,7 +144,7 @@ abstract contract AbstractApeStakingStrategy is
                 abi.encodeWithSelector(
                     IERC20Upgradeable.approve.selector,
                     address(_apeStaking),
-                    2**256 - 1
+                    2 ** 256 - 1
                 )
             );
         }
@@ -381,10 +376,10 @@ abstract contract AbstractApeStakingStrategy is
     /// The entire apecoin balance of the clone contract is transferred.
     /// @param _owner The owner of the tokens to transfer
     /// @param _recipient Token transfer recipient
-    function transferApeCoin(address _owner, address _recipient)
-        external
-        onlyRole(BAKC_STRATEGY_ROLE)
-    {
+    function transferApeCoin(
+        address _owner,
+        address _recipient
+    ) external onlyRole(BAKC_STRATEGY_ROLE) {
         address _clone = _getCloneOrRevert(_owner);
 
         IERC20Upgradeable _ape = ape;
@@ -445,11 +440,9 @@ abstract contract AbstractApeStakingStrategy is
         );
     }
 
-    function _getCloneOrRevert(address _account)
-        internal
-        view
-        returns (address clone)
-    {
+    function _getCloneOrRevert(
+        address _account
+    ) internal view returns (address clone) {
         clone = depositAddress(_account);
         if (!clone.isContract()) revert Unauthorized();
     }

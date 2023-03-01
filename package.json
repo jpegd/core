@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "compile": "hardhat compile",
-    "prettier": "prettier --write \"tests/**/*.ts\" \"deploy/**/*.ts\"",
+    "prettier": "prettier --write .",
     "test": "hardhat test",
     "coverage": "rm -r ./cache & hardhat coverage --network hardhat"
   },
@@ -28,6 +28,8 @@
     "hardhat": "^2.2.0",
     "hardhat-abi-exporter": "^2.2.1",
     "hardhat-gas-reporter": "^1.0.4",
+    "prettier": "^2.8.4",
+    "prettier-plugin-solidity": "^1.1.3",
     "solc": "^0.8.3",
     "solidity-bytes-utils": "^0.8.0",
     "solidity-coverage": "^0.7.16",

@@ -35,13 +35,11 @@ contract JPEGVaultRouter is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         __ReentrancyGuard_init();
     }
 
-
     /// @notice Executes multiple actions on the specified vaults in one transaction.
     /// @dev If `_actions.target` equals `address(this)`, executes actions locally.
-    function batchExecute(BatchAction[] calldata _actions)
-        external
-        nonReentrant
-    {
+    function batchExecute(
+        BatchAction[] calldata _actions
+    ) external nonReentrant {
         uint256 _length = _actions.length;
         if (_length == 0) revert InvalidLength();
 
@@ -61,18 +59,18 @@ contract JPEGVaultRouter is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         }
     }
 
-    /// @notice Executes multiple (local) actions at once. 
-    function batchExecuteSelf(uint8[] calldata _actions, bytes[] calldata _data)
-        external
-        nonReentrant
-    {
+    /// @notice Executes multiple (local) actions at once.
+    function batchExecuteSelf(
+        uint8[] calldata _actions,
+        bytes[] calldata _data
+    ) external nonReentrant {
         _batchExecuteSelf(_actions, _data);
     }
 
-    function whitelistVault(address _vault, bool _isWrapped)
-        external
-        onlyOwner
-    {
+    function whitelistVault(
+        address _vault,
+        bool _isWrapped
+    ) external onlyOwner {
         if (_vault == address(0)) revert();
 
         whitelistedVaults[INFTVault(_vault)] = true;
@@ -101,7 +99,7 @@ contract JPEGVaultRouter is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             } else revert UnknownAction(_action);
         }
     }
-    
+
     /// @notice Migrates the position at `_nftIndex` from `_sourceVault` to `_destVault`.
     /// Both vaults must be whitelisted, use the same collection as collateral and the same stablecoin.
     /// In case of wrapped NFTs, the underlying `nftAddress` is compared.

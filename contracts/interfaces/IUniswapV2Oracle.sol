@@ -2,7 +2,8 @@
 pragma solidity ^0.8.4;
 
 interface IUniswapV2Oracle {
-    function consultAndUpdateIfNecessary(address token, uint256 amountIn)
-        external
-        returns (uint256);
+    function consultAndUpdateIfNecessary(
+        address token,
+        uint256 amountIn
+    ) external returns (uint256);
 }

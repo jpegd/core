@@ -9,13 +9,10 @@ import "./TokenVesting.sol";
 /// @notice {JPEG} vesting contract, beneficiaries get {PreJPEG}, which can be burned linearly to unlock {JPEG}.
 /// {PreJPEG} cannot be transferred.
 contract PreJPEG is ERC20Votes, TokenVesting {
-
     /// @param _jpeg The token to vest
-    constructor(address _jpeg)
-        ERC20("preJPEG", "pJPEG")
-        ERC20Permit("preJPEG")
-        TokenVesting(_jpeg)
-    {}
+    constructor(
+        address _jpeg
+    ) ERC20("preJPEG", "pJPEG") ERC20Permit("preJPEG") TokenVesting(_jpeg) {}
 
     /// @inheritdoc TokenVesting
     /// @notice Beneficiaries get an amount of {PreJPEG} equal to `totalAllocation`
@@ -45,7 +42,7 @@ contract PreJPEG is ERC20Votes, TokenVesting {
     }
 
     /// @inheritdoc TokenVesting
-    /// @notice An amount of {PreJPEG} equal to the amount of {JPEG} released is burnt from the sender's wallet when this function is called 
+    /// @notice An amount of {PreJPEG} equal to the amount of {JPEG} released is burnt from the sender's wallet when this function is called
     function release() public override {
         uint256 balanceBeforeRelease = token.balanceOf(address(this));
         super.release();

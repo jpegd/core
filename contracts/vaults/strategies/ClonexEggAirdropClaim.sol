@@ -11,12 +11,17 @@ interface IEgg is IERC721 {
     function mint(uint256[] calldata _ids) external;
 }
 
-contract ClonexEggAirdropClaim is AccessControl, IFlashNFTStrategy, IERC721Receiver {
+contract ClonexEggAirdropClaim is
+    AccessControl,
+    IFlashNFTStrategy,
+    IERC721Receiver
+{
     error Unauthorized();
 
     bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
 
-    IERC721 public constant CLONEX = IERC721(0x49cF6f5d44E70224e2E23fDcdd2C053F30aDA28B);
+    IERC721 public constant CLONEX =
+        IERC721(0x49cF6f5d44E70224e2E23fDcdd2C053F30aDA28B);
     IEgg public constant EGG = IEgg(0x6c410cF0B8c113Dc6A7641b431390B11d5515082);
 
     address private currentLoanee;

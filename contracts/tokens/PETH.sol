@@ -7,12 +7,12 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 
- /// @title PETH - JPEG'd ETH Stablecoin
- /// @notice PETH is minted by the {PETHNFTVault} (backed by NFTs) and the {FungibleAssetVaultForDAO} (backed by fungible assets)
- /// @dev Roles (at launch)
- /// DEFAULT_ADMIN_ROLE: DAO
- /// MINTER_ROLE: Vaults ({FungibleAssetVaultForDAO} and {PETHNFTVault})
- /// PAUSER_ROLE: None
+/// @title PETH - JPEG'd ETH Stablecoin
+/// @notice PETH is minted by the {PETHNFTVault} (backed by NFTs) and the {FungibleAssetVaultForDAO} (backed by fungible assets)
+/// @dev Roles (at launch)
+/// DEFAULT_ADMIN_ROLE: DAO
+/// MINTER_ROLE: Vaults ({FungibleAssetVaultForDAO} and {PETHNFTVault})
+/// PAUSER_ROLE: None
 contract PETH is
     Context,
     AccessControlEnumerable,
