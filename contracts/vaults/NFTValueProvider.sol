@@ -241,11 +241,9 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             );
     }
 
-    /// @param _nftIndex The index of the NFT to calculate the JPEG lock amount for
     /// @param _jpegPrice The JPEG price in ETH (18 decimals)
     /// @return The JPEG to lock for the specified `_nftIndex`
     function calculateLTVBoostLock(
-        uint256 _nftIndex,
         uint256 _jpegPrice,
         uint128 _rateIncreaseBps
     ) external view returns (uint256) {
@@ -256,15 +254,13 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         if (_greaterThan(_rateIncrease, jpegLockedMaxRateIncrease))
             revert InvalidRate(_rateIncrease);
 
-        uint256 nftValue = getNFTValueETH(_nftIndex);
-
         Rate memory creditLimitRate = baseCreditLimitRate;
         return
             _calculateLTVBoostLock(
                 creditLimitRate,
                 _rateSum(creditLimitRate, _rateIncrease),
                 ltvBoostLockRate,
-                nftValue,
+                getFloorETH(),
                 _jpegPrice
             );
     }
