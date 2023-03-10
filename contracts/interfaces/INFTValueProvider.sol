@@ -11,4 +11,6 @@ interface INFTValueProvider {
         address _owner,
         uint256 _nftIndex
     ) external view returns (uint256);
+
+    function getNFTValueETH(uint256 _nftIndex) external view returns (uint256);
 }
