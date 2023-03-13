@@ -422,6 +422,51 @@ describe("PUSDDAONFTVault", () => {
         expect(await erc721.ownerOf(indexes[0])).to.equal(user.address);
     });
 
+    it("should allow users with NFTs deposited in standard strategies to use flash strategies", async () => {
+        const Flash = await ethers.getContractFactory("MockFlashStrategy");
+        const flash = await Flash.deploy(erc721.address);
+        const Standard = await ethers.getContractFactory(
+            "MockStandardStrategy"
+        );
+        const standard = await Standard.deploy(erc721.address);
+
+        await nftVault.connect(dao).addStrategy(flash.address);
+        await nftVault.connect(dao).addStrategy(standard.address);
+
+        const index = 100;
+        await erc721.mint(user.address, index);
+
+        await erc721.connect(user).setApprovalForAll(nftVault.address, true);
+        const borrowAmount = units(10);
+        await nftVault.connect(user).borrow(index, borrowAmount);
+
+        await nftVault.connect(user).depositInStrategy([index], 1, "0x");
+
+        await expect(
+            nftVault
+                .connect(user)
+                .flashStrategyFromStandardStrategy([], 1, 0, "0x", "0x")
+        ).to.be.revertedWith("InvalidLength()");
+
+        await expect(
+            nftVault
+                .connect(user)
+                .flashStrategyFromStandardStrategy([100], 0, 1, "0x", "0x")
+        ).to.be.revertedWith("InvalidStrategy()");
+
+        await flash.shouldSendBack(false);
+        await expect(
+            nftVault
+                .connect(user)
+                .flashStrategyFromStandardStrategy([100], 1, 0, "0x", "0x")
+        ).to.be.revertedWith("InvalidStrategy()");
+
+        await flash.shouldSendBack(true);
+        await nftVault
+            .connect(user)
+            .flashStrategyFromStandardStrategy([100], 1, 0, "0x", "0x");
+    });
+
     it("should allow users to execute multiple actions in one call", async () => {
         const index1 = apes[2];
         const index2 = 7000;

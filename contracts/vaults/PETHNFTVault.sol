@@ -83,6 +83,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address indexed strategy
     );
 
+    event Accrual(uint256 additionalInterest);
+
     enum BorrowType {
         NOT_CONFIRMED,
         NON_INSURANCE,
@@ -326,6 +328,8 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         totalDebtAmount += additionalInterest;
         totalFeeCollected += additionalInterest;
+
+        emit Accrual(additionalInterest);
     }
 
     /// @notice Like {doActions} but executed with the specified `_account`.
