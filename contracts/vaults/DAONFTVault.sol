@@ -57,6 +57,7 @@ contract DAONFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     );
 
     event Accrual(uint256 additionalInterest);
+    event FeeCollected(uint256 collectedAmount);
 
     struct Position {
         uint256 debtPrincipal;
@@ -325,8 +326,13 @@ contract DAONFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows the DAO to collect interest and fees before they are repaid
     function collect() external nonReentrant onlyRole(DAO_ROLE) {
         accrue();
-        stablecoin.mint(msg.sender, totalFeeCollected);
+
+        uint256 _totalFeeCollected = totalFeeCollected;
+
+        stablecoin.mint(msg.sender, _totalFeeCollected);
         totalFeeCollected = 0;
+
+        emit FeeCollected(_totalFeeCollected);
     }
 
     /// @notice Allows the DAO to withdraw _amount of an ERC20

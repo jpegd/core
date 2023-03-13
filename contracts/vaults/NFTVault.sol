@@ -13,6 +13,8 @@ import "../interfaces/INFTValueProvider.sol";
 import "../interfaces/IStandardNFTStrategy.sol";
 import "../interfaces/IFlashNFTStrategy.sol";
 
+import "../utils/RateLib.sol";
+
 /// @title NFT lending vault
 /// @notice This contracts allows users to borrow PUSD using NFTs as collateral.
 /// The floor price of the NFT collection is fetched using a chainlink oracle, while some other more valuable traits
@@ -24,9 +26,9 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IStableCoin;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.AddressSet;
+    using RateLib for RateLib.Rate;
 
     error InvalidNFT(uint256 nftIndex);
-    error InvalidRate(Rate rate);
     error InvalidNFTType(bytes32 nftType);
     error InvalidUnlockTime(uint256 unlockTime);
     error InvalidAmount(uint256 amount);
@@ -84,6 +86,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     );
 
     event Accrual(uint256 additionalInterest);
+    event FeeCollected(uint256 collectedAmount);
 
     enum BorrowType {
         NOT_CONFIRMED,
@@ -101,11 +104,6 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         IStandardNFTStrategy strategy;
     }
 
-    struct Rate {
-        uint128 numerator;
-        uint128 denominator;
-    }
-
     /// @custom:oz-renamed-from JPEGLock
     struct Unused13 {
         address owner;
@@ -114,20 +112,20 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     struct VaultSettings {
-        Rate debtInterestApr;
+        RateLib.Rate debtInterestApr;
         /// @custom:oz-renamed-from creditLimitRate
-        Rate unused15;
+        RateLib.Rate unused15;
         /// @custom:oz-renamed-from liquidationLimitRate
-        Rate unused16;
+        RateLib.Rate unused16;
         /// @custom:oz-renamed-from cigStakedCreditLimitRate
-        Rate unused17;
+        RateLib.Rate unused17;
         /// @custom:oz-renamed-from cigStakedLiquidationLimitRate
-        Rate unused18;
+        RateLib.Rate unused18;
         /// @custom:oz-renamed-from valueIncreaseLockRate
-        Rate unused12;
-        Rate organizationFeeRate;
-        Rate insurancePurchaseRate;
-        Rate insuranceLiquidationPenaltyRate;
+        RateLib.Rate unused12;
+        RateLib.Rate organizationFeeRate;
+        RateLib.Rate insurancePurchaseRate;
+        RateLib.Rate insuranceLiquidationPenaltyRate;
         uint256 insuranceRepurchaseTimeLimit;
         uint256 borrowAmountCap;
     }
@@ -166,6 +164,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     address private unused3; //Unused after upgrade
     /// @custom:oz-renamed-from cigStaking
     address private unused14;
+
     IERC721Upgradeable public nftContract;
 
     /// @custom:oz-renamed-from daoFloorOverride
@@ -198,7 +197,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @custom:oz-renamed-from minJPEGToLock
     uint256 private unused6;
     /// @custom:oz-renamed-from nftTypeValueMultiplier
-    mapping(bytes32 => Rate) private unused7;
+    mapping(bytes32 => RateLib.Rate) private unused7;
     /// @custom:oz-renamed-from lockPositions
     mapping(uint256 => Unused13) private unused13;
 
@@ -226,10 +225,25 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _setRoleAdmin(ROUTER_ROLE, DAO_ROLE);
         _setRoleAdmin(DAO_ROLE, DAO_ROLE);
 
-        _validateRateBelowOne(_settings.debtInterestApr);
-        _validateRateBelowOne(_settings.organizationFeeRate);
-        _validateRateBelowOne(_settings.insurancePurchaseRate);
-        _validateRateBelowOne(_settings.insuranceLiquidationPenaltyRate);
+        if (
+            !_settings.debtInterestApr.isValid() ||
+            !_settings.debtInterestApr.isBelowOne()
+        ) revert RateLib.InvalidRate();
+
+        if (
+            !_settings.organizationFeeRate.isValid() ||
+            !_settings.organizationFeeRate.isBelowOne()
+        ) revert RateLib.InvalidRate();
+
+        if (
+            !_settings.insurancePurchaseRate.isValid() ||
+            !_settings.insurancePurchaseRate.isBelowOne()
+        ) revert RateLib.InvalidRate();
+
+        if (
+            !_settings.insuranceLiquidationPenaltyRate.isValid() ||
+            !_settings.insuranceLiquidationPenaltyRate.isBelowOne()
+        ) revert RateLib.InvalidRate();
 
         stablecoin = _stablecoin;
         ethAggregator = _ethAggregator;
@@ -605,8 +619,13 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Allows the DAO to collect interest and fees before they are repaid
     function collect() external nonReentrant onlyRole(DAO_ROLE) {
         accrue();
-        stablecoin.mint(msg.sender, totalFeeCollected);
+
+        uint256 _totalFeeCollected = totalFeeCollected;
+
+        stablecoin.mint(msg.sender, _totalFeeCollected);
         totalFeeCollected = 0;
+
+        emit FeeCollected(_totalFeeCollected);
     }
 
     /// @notice Allows the DAO to withdraw _amount of an ERC20
@@ -1254,12 +1273,5 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                     ? uint256(answer) / 10 ** (decimals - 18)
                     : uint256(answer) * 10 ** (18 - decimals);
         }
-    }
-
-    /// @dev Validates a rate. The denominator must be greater than zero and greater than or equal to the numerator.
-    /// @param _rate The rate to validate
-    function _validateRateBelowOne(Rate memory _rate) internal pure {
-        if (_rate.denominator == 0 || _rate.denominator < _rate.numerator)
-            revert InvalidRate(_rate);
     }
 }
