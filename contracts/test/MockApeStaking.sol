@@ -12,6 +12,7 @@ contract MockApeStaking is IApeStaking {
         bool isPaired;
     }
 
+    uint256 constant APE_ID = 0;
     uint256 constant BAYC_ID = 1;
     uint256 constant MAYC_ID = 2;
     uint256 constant BAKC_ID = 3;
@@ -21,6 +22,9 @@ contract MockApeStaking is IApeStaking {
     IERC721 mayc;
     IERC721 bakc;
 
+    mapping(uint256 => mapping(address => mapping(uint256 => uint256)))
+        public
+        override pendingRewards;
     mapping(uint256 => mapping(uint256 => uint256)) depositedAmounts;
     mapping(uint256 => mapping(uint256 => PairingStatus))
         public
@@ -34,6 +38,31 @@ contract MockApeStaking is IApeStaking {
         bayc = _bayc;
         mayc = _mayc;
         bakc = _bakc;
+    }
+
+    function setPendingRewards(
+        uint256 _poolId,
+        address _account,
+        uint256 _tokenId,
+        uint256 _rewards
+    ) external {
+        pendingRewards[_poolId][_account][_tokenId] = _rewards;
+    }
+
+    function withdrawApeCoin(
+        uint256 _amount,
+        address _recipient
+    ) external override {
+        ape.transfer(_recipient, _amount);
+    }
+
+    function depositApeCoin(uint256 _amount, address) external override {
+        ape.transferFrom(msg.sender, address(this), _amount);
+    }
+
+    function claimApeCoin(address _recipient) external override {
+        ape.mint(_recipient, pendingRewards[APE_ID][msg.sender][0]);
+        pendingRewards[APE_ID][msg.sender][0] = 0;
     }
 
     function nftPosition(
@@ -85,14 +114,14 @@ contract MockApeStaking is IApeStaking {
         uint256[] calldata _nfts,
         address _recipient
     ) external override {
-        _claimNFT(_nfts, _recipient, bayc);
+        _claimNFT(BAYC_ID, _nfts, _recipient, bayc);
     }
 
     function claimMAYC(
         uint256[] calldata _nfts,
         address _recipient
     ) external override {
-        _claimNFT(_nfts, _recipient, mayc);
+        _claimNFT(MAYC_ID, _nfts, _recipient, mayc);
     }
 
     function claimBAKC(
@@ -196,15 +225,19 @@ contract MockApeStaking is IApeStaking {
     }
 
     function _claimNFT(
+        uint256 _poolId,
         uint256[] calldata _nfts,
         address _recipient,
         IERC721 _contract
     ) internal {
+        uint256 _totalRewards;
         for (uint256 i; i < _nfts.length; ++i) {
             require(_contract.ownerOf(_nfts[i]) == msg.sender);
+            _totalRewards += pendingRewards[_poolId][msg.sender][_nfts[i]];
+            pendingRewards[_poolId][msg.sender][_nfts[i]] = 0;
         }
 
-        ape.mint(_recipient, _nfts.length * 1 ether);
+        ape.mint(_recipient, _totalRewards);
     }
 
     function _claimPairNft(
@@ -212,12 +245,17 @@ contract MockApeStaking is IApeStaking {
         address _recipient,
         IERC721 _contract
     ) internal {
+        uint256 _totalRewards;
         IERC721 _bakc = bakc;
         for (uint256 i; i < _pairs.length; ++i) {
             require(_bakc.ownerOf(_pairs[i].bakcTokenId) == msg.sender);
             require(_contract.ownerOf(_pairs[i].mainTokenId) == msg.sender);
+            _totalRewards += pendingRewards[BAKC_ID][msg.sender][
+                _pairs[i].bakcTokenId
+            ];
+            pendingRewards[BAKC_ID][msg.sender][_pairs[i].bakcTokenId] = 0;
         }
 
-        ape.mint(_recipient, _pairs.length * 1 ether);
+        ape.mint(_recipient, _totalRewards);
     }
 }

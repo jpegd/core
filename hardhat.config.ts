@@ -8,6 +8,7 @@ import "hardhat-abi-exporter";
 import "solidity-coverage";
 import "@typechain/hardhat";
 import "@openzeppelin/hardhat-upgrades";
+import "hardhat-contract-sizer";
 
 dotenv.config();
 
@@ -18,7 +19,9 @@ module.exports = {
         currency: "USD"
     },
     networks: {
-        hardhat: {},
+        hardhat: {
+            allowUnlimitedContractSize: true
+        },
         kovan: {
             url:
                 "https://eth-kovan.alchemyapi.io/v2/" +
