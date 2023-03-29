@@ -5,7 +5,7 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import "../../interfaces/IApeStakingStrategy.sol";
+import "../../../interfaces/IApeStakingStrategy.sol";
 
 contract BAKCApeStakingStrategy is
     AccessControlUpgradeable,

@@ -7,7 +7,9 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 
 import "../interfaces/IApeStaking.sol";
+import "../utils/ApeStakingLib.sol";
 
+/// @custom:oz-upgrades-unsafe-allow external-library-linking
 contract ApeMatchingMarketplace is
     AccessControlUpgradeable,
     ReentrancyGuardUpgradeable
@@ -18,7 +20,7 @@ contract ApeMatchingMarketplace is
     error InvalidOffer(uint24 nonce);
     error NoRewards();
     error Unauthorized();
-    error BAKCAlreadyPaired(uint256 id);
+    error InvalidNFT();
     error UnknownAction(uint8 action);
 
     event OfferCreated(address indexed owner, uint256 indexed nonce);
@@ -54,13 +56,8 @@ contract ApeMatchingMarketplace is
         SINGLE_SIDE
     }
 
-    enum Collections {
-        BAYC,
-        MAYC
-    }
-
     struct MainNFT {
-        Collections collection;
+        ApeStakingLib.Collections collection;
         uint16 tokenId;
     }
 
@@ -76,13 +73,13 @@ contract ApeMatchingMarketplace is
     }
 
     struct MainNFTDeposit {
-        uint24 mainOrderNonce;
-        uint24 bakcOrderNonce;
+        uint24 mainOfferNonce;
+        uint24 bakcOfferNonce;
         bool isDeposited;
     }
 
     struct BAKCDeposit {
-        uint24 orderNonce;
+        uint24 offerNonce;
         bool isDeposited;
     }
 
@@ -99,7 +96,7 @@ contract ApeMatchingMarketplace is
         bool isSingleStaking;
     }
 
-    struct OrderRewards {
+    struct OfferRewards {
         uint80 rewardsPerShare;
         uint80 ownerRewards;
         uint80 bakcRewards;
@@ -122,9 +119,18 @@ contract ApeMatchingMarketplace is
     uint256 internal constant MAYC_POOL_ID = 2;
     uint256 internal constant BAKC_POOL_ID = 3;
 
+    //public actions
     uint8 internal constant ACTION_DEPOSIT_APE = 0;
     uint8 internal constant ACTION_WITHDRAW_APE = 1;
     uint8 internal constant ACTION_CLAIM_APE = 2;
+
+    //strategy actions
+    uint8 internal constant ACTION_DEPOSIT_MAIN = 100;
+    uint8 internal constant ACTION_DEPOSIT_BAKC = 101;
+    uint8 internal constant ACTION_WITHDRAW_MAIN = 102;
+    uint8 internal constant ACTION_WITHDRAW_BAKC = 103;
+    uint8 internal constant ACTION_TRANSFER_MAIN = 104;
+    uint8 internal constant ACTION_TRANSFER_BAKC = 105;
 
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IERC20Upgradeable internal immutable APE;
@@ -140,16 +146,16 @@ contract ApeMatchingMarketplace is
 
     uint24 internal nextNonce;
 
-    SingleStakingPool public singleStakingPool;
+    SingleStakingPool internal singleStakingPool;
 
     mapping(uint24 => Offer) public offers;
     mapping(uint24 => mapping(address => Position)) public positions;
 
-    mapping(Collections => mapping(uint16 => MainNFTDeposit))
+    mapping(ApeStakingLib.Collections => mapping(uint16 => MainNFTDeposit))
         public mainDeposits;
     mapping(uint16 => BAKCDeposit) public bakcDeposits;
 
-    mapping(uint24 => OrderRewards) internal rewards;
+    mapping(uint24 => OfferRewards) internal rewards;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(
@@ -179,13 +185,16 @@ contract ApeMatchingMarketplace is
         APE.approve(address(APE_STAKING), type(uint256).max);
     }
 
+    /// @return _userRewards Pending rewards for the position for account `_user` and offer nonce `_nonce`
+    /// @param _nonce The offer nonce
+    /// @param _user The owner of the position
     function pendingRewards(
         uint24 _nonce,
         address _user
     ) external view returns (uint256 _userRewards) {
         Offer memory _offer = offers[_nonce];
         Position memory _position = positions[_nonce][_user];
-        OrderRewards memory _orderRewards = rewards[_nonce];
+        OfferRewards memory _offerRewards = rewards[_nonce];
 
         if (
             _offer.offerType == OfferType.MAIN ||
@@ -193,16 +202,16 @@ contract ApeMatchingMarketplace is
         )
             (, , , _userRewards, ) = _calculateUpdatedRewardsData(
                 _position,
-                _orderRewards,
+                _offerRewards,
                 _offer
             );
         else if (_offer.offerType == OfferType.SINGLE_SIDE) {
             if (!_position.isSingleStaking) {
                 (, , _userRewards) = _calculateUpdatedPositionRewards(
                     _position,
-                    _orderRewards.rewardsPerShare,
-                    _orderRewards.ownerRewards,
-                    _orderRewards.bakcRewards
+                    _offerRewards.rewardsPerShare,
+                    _offerRewards.ownerRewards,
+                    _offerRewards.bakcRewards
                 );
 
                 _position.lastRewardsPerShare = _offer
@@ -222,13 +231,17 @@ contract ApeMatchingMarketplace is
         }
     }
 
+    /// @notice Allows users to execute multiple actions in a single transaction.
+    /// @param _actions The actions to execute.
+    /// @param _data The abi encoded parameters for the actions to execute.
     function doActions(
         uint8[] calldata _actions,
         bytes[] calldata _data
     ) external nonReentrant {
-        if (_actions.length != _data.length) revert InvalidLength();
+        uint256 _length = _actions.length;
+        if (_length != _data.length) revert InvalidLength();
 
-        for (uint256 i; i < _actions.length; ++i) {
+        for (uint256 i; i < _length; ++i) {
             uint8 _action = _actions[i];
 
             if (_action == ACTION_DEPOSIT_APE) {
@@ -245,24 +258,259 @@ contract ApeMatchingMarketplace is
                 _withdrawApe(_nonce, _apeAmount);
             } else if (_action == ACTION_CLAIM_APE) {
                 uint24 _nonce = abi.decode(_data[i], (uint24));
-                _claimRewards(_nonce);
+                _claimApe(_nonce);
             } else revert UnknownAction(_action);
         }
     }
 
-    function createOffers(
+    /// @notice Allows strategies to execute multiple actions in a single transaction.
+    /// @param _actions The actions to execute.
+    /// @param _data The abi encoded parameters for the actions to execute.
+    function doStrategyActions(
         address _caller,
-        MainNFT calldata _nft,
+        uint8[] calldata _actions,
+        bytes[] calldata _data
+    ) external nonReentrant {
+        _checkRole(STRATEGY_ROLE, msg.sender);
+
+        uint256 _length = _actions.length;
+        if (_length != _data.length) revert InvalidLength();
+
+        for (uint256 i; i < _length; ++i) {
+            uint8 _action = _actions[i];
+
+            if (_action == ACTION_DEPOSIT_MAIN) {
+                (
+                    MainNFT memory _nft,
+                    uint80 _apeAmountMain,
+                    uint80 _apeAmountBAKC,
+                    uint16 _mainPoolApeShareBps,
+                    uint16 _bakcPoolApeShareBps,
+                    uint16 _bakcPoolBAKCShareBps
+                ) = abi.decode(
+                        _data[i],
+                        (MainNFT, uint80, uint80, uint16, uint16, uint16)
+                    );
+                _depositMain(
+                    _caller,
+                    _nft,
+                    _apeAmountMain,
+                    _apeAmountBAKC,
+                    _mainPoolApeShareBps,
+                    _bakcPoolApeShareBps,
+                    _bakcPoolBAKCShareBps
+                );
+            } else if (_action == ACTION_DEPOSIT_BAKC) {
+                (uint24 _nonce, uint16 _bakcTokenId, uint80 _apeAmount) = abi
+                    .decode(_data[i], (uint24, uint16, uint80));
+                _depositBAKC(_caller, _nonce, _bakcTokenId, _apeAmount);
+            } else if (_action == ACTION_WITHDRAW_MAIN) {
+                (
+                    ApeStakingLib.Collections _collection,
+                    uint16 _tokenId,
+                    address _recipient
+                ) = abi.decode(
+                        _data[i],
+                        (ApeStakingLib.Collections, uint16, address)
+                    );
+                _withdrawMain(_caller, _collection, _tokenId, _recipient);
+            } else if (_action == ACTION_WITHDRAW_BAKC) {
+                (uint16 _bakcTokenId, address _recipient) = abi.decode(
+                    _data[i],
+                    (uint16, address)
+                );
+                _withdrawBAKC(_caller, _bakcTokenId, _recipient);
+            } else if (_action == ACTION_TRANSFER_MAIN) {
+                (
+                    ApeStakingLib.Collections _collection,
+                    uint16 _tokenId,
+                    address _recipient
+                ) = abi.decode(
+                        _data[i],
+                        (ApeStakingLib.Collections, uint16, address)
+                    );
+
+                if (_collection == ApeStakingLib.Collections.BAYC)
+                    _transferNFT(BAYC, address(this), _recipient, _tokenId);
+                else _transferNFT(MAYC, address(this), _recipient, _tokenId);
+            } else if (_action == ACTION_TRANSFER_BAKC) {
+                (uint16 _bakcTokenId, address _recipient) = abi.decode(
+                    _data[i],
+                    (uint16, address)
+                );
+                _transferNFT(BAKC, address(this), _recipient, _bakcTokenId);
+            } else revert UnknownAction(_action);
+        }
+    }
+
+    //doActions functions
+
+    /// @notice Allows users to deposit `_apeAmount` of apecoin for the offer with nonce `_nonce`.
+    /// Can be called with action `ACTION_DEPOSIT_APE`.
+    /// @param _nonce The offer nonce
+    /// @param _apeAmount The amount of apecoin to deposit
+    function _depositApe(uint24 _nonce, uint80 _apeAmount) internal {
+        Offer memory _offer = offers[_nonce];
+        if (
+            _offer.offerType != OfferType.MAIN &&
+            _offer.offerType != OfferType.BAKC
+        ) revert InvalidOffer(_nonce);
+
+        _validateApeDeposit(
+            _apeAmount,
+            _offer.apeAmount,
+            _offer.offerType,
+            _offer.mainNft.collection
+        );
+
+        (Position memory _position, uint256 _rewards) = _claimRewards(
+            msg.sender,
+            _nonce,
+            positions[_nonce][msg.sender],
+            _offer
+        );
+
+        if (_rewards > _apeAmount) {
+            unchecked {
+                _transferApe(address(this), msg.sender, _rewards - _apeAmount);
+            }
+        } else {
+            unchecked {
+                _transferApe(msg.sender, address(this), _apeAmount - _rewards);
+            }
+        }
+
+        if (_offer.offerType == OfferType.MAIN)
+            _stakeApeMain(
+                _apeAmount,
+                _offer.mainNft.collection,
+                _offer.mainNft.tokenId
+            );
+        else if (_offer.isPaired)
+            _stakeApeBAKC(
+                _apeAmount,
+                _offer.mainNft.collection,
+                _offer.mainNft.tokenId,
+                _offer.bakcTokenId
+            );
+
+        _position.apeAmount += _apeAmount;
+        _offer.apeAmount += _apeAmount;
+
+        positions[_nonce][msg.sender] = _position;
+        offers[_nonce] = _offer;
+
+        emit ApeDeposited(msg.sender, _nonce, _apeAmount);
+    }
+
+    /// @notice Allows users to withdraw `_apeAmount` of apecoin from the offer with nonce `_nonce`.
+    /// Can be called with action `ACTION_WITHDRAW_APE`.
+    /// @param _nonce The offer nonce
+    /// @param _apeAmount The amount of apecoin to withdraw
+    function _withdrawApe(uint24 _nonce, uint80 _apeAmount) internal {
+        Offer memory _offer = offers[_nonce];
+
+        (Position memory _position, uint256 _rewards) = _claimRewards(
+            msg.sender,
+            _nonce,
+            positions[_nonce][msg.sender],
+            _offer
+        );
+
+        if (_apeAmount < MIN_APE || _apeAmount > _position.apeAmount)
+            revert InvalidAmount();
+
+        unchecked {
+            _position.apeAmount -= _apeAmount;
+        }
+
+        if (_position.apeAmount != 0 && _position.apeAmount < MIN_APE)
+            revert InvalidAmount();
+
+        if (_offer.offerType == OfferType.MAIN)
+            _unstakeApeMain(
+                _apeAmount,
+                _offer.mainNft.collection,
+                _offer.mainNft.tokenId
+            );
+        else if (_offer.offerType == OfferType.BAKC) {
+            if (_offer.isPaired)
+                _unstakeApeBAKC(
+                    _apeAmount,
+                    _offer.apeAmount == _apeAmount,
+                    _offer.mainNft.collection,
+                    _offer.mainNft.tokenId,
+                    _offer.bakcTokenId
+                );
+        } else if (_offer.offerType == OfferType.SINGLE_SIDE) {
+            singleStakingPool.apeAmount -= _apeAmount;
+            APE_STAKING.withdrawApeCoin(_apeAmount, address(this));
+        }
+
+        _offer.apeAmount -= _apeAmount;
+
+        positions[_nonce][msg.sender] = _position;
+        offers[_nonce] = _offer;
+
+        _transferApe(address(this), msg.sender, _apeAmount + _rewards);
+
+        emit ApeWithdrawn(msg.sender, _nonce, _apeAmount);
+    }
+
+    /// @notice Allows users to claim pending rewards from the offer with nonce `_nonce`.
+    /// Can be called with action `ACTION_CLAIM_APE`.
+    /// @param _nonce The offer nonce
+    function _claimApe(uint24 _nonce) internal {
+        (Position memory _position, uint256 _rewards) = _claimRewards(
+            msg.sender,
+            _nonce,
+            positions[_nonce][msg.sender],
+            offers[_nonce]
+        );
+
+        positions[_nonce][msg.sender] = _position;
+
+        if (_rewards == 0) revert NoRewards();
+
+        _transferApe(address(this), msg.sender, _rewards);
+    }
+
+    //doStrategyActions functions
+
+    /// @notice Allows strategies to deposit a BAYC/MAYC and create offers with the specified params.
+    /// Can be called with action `ACTION_DEPOSIT_MAIN`
+    /// @param _caller The account the strategy is calling for
+    /// @param _nft The NFT to deposit
+    /// @param _apeAmountMain The amount of ape to deposit to the newly created main offer. If not 0, has to be greater than `MIN_APE`
+    /// and less than `MAX_APE_BAYC` for BAYCs and `MAX_APE_MAYC` for MAYCs
+    /// @param _apeAmountBAKC The amount of ape to deposit to the newly created bakc offer. If not 0, has to be greater than `MIN_APE`
+    /// and less than `MAX_APE_BAKC`
+    /// @param _mainPoolApeShareBps The apecoin share of rewards in bps for the main offer. Has to be greater than 0 and less than 10000.
+    /// @param _bakcPoolApeShareBps The apecoin share of rewards in bps for the bakc offer. Has to be greater than 0 and less than 10000.
+    /// @param _bakcPoolBAKCShareBps The BAKC share of rewards in bps for the bakc offer. Has to be greater than 0 and less than 10000.
+    function _depositMain(
+        address _caller,
+        MainNFT memory _nft,
         uint80 _apeAmountMain,
         uint80 _apeAmountBAKC,
         uint16 _mainPoolApeShareBps,
         uint16 _bakcPoolApeShareBps,
         uint16 _bakcPoolBAKCShareBps
-    ) external nonReentrant {
-        _checkRole(STRATEGY_ROLE, msg.sender);
-
+    ) internal {
         uint24 _mainNonce = nextNonce;
         uint24 _bakcNonce = _mainNonce + 1;
+
+        uint256 _poolId = _nft.collection == ApeStakingLib.Collections.BAYC
+            ? BAYC_POOL_ID
+            : MAYC_POOL_ID;
+
+        (uint256 _stakedAmount, ) = APE_STAKING.nftPosition(
+            _poolId,
+            _nft.tokenId
+        );
+
+        (, bool _isPaired) = APE_STAKING.mainToBakc(_poolId, _nft.tokenId);
+        if (_stakedAmount != 0 || _isPaired) revert InvalidNFT();
 
         _createOffer(
             OfferType.MAIN,
@@ -284,25 +532,22 @@ contract ApeMatchingMarketplace is
             _bakcPoolBAKCShareBps
         );
 
-        nextNonce = _bakcNonce + 1;
+        unchecked {
+            nextNonce = _bakcNonce + 1;
+        }
 
         mainDeposits[_nft.collection][_nft.tokenId] = MainNFTDeposit({
-            mainOrderNonce: _mainNonce,
-            bakcOrderNonce: _bakcNonce,
+            mainOfferNonce: _mainNonce,
+            bakcOfferNonce: _bakcNonce,
             isDeposited: true
         });
 
         uint80 _totalApeAmount = _apeAmountBAKC + _apeAmountMain;
         if (_totalApeAmount != 0) {
-            APE.transferFrom(_caller, address(this), _totalApeAmount);
+            _transferApe(_caller, address(this), _totalApeAmount);
 
             if (_apeAmountMain != 0) {
-                _updateStakedApeAmountMain(
-                    _apeAmountMain,
-                    _nft.collection,
-                    _nft.tokenId,
-                    false
-                );
+                _stakeApeMain(_apeAmountMain, _nft.collection, _nft.tokenId);
 
                 emit ApeDeposited(_caller, _mainNonce, _apeAmountMain);
             }
@@ -312,180 +557,19 @@ contract ApeMatchingMarketplace is
         }
     }
 
-    function withdrawMainNFT(
-        address _caller,
-        Collections _collection,
-        uint16 _tokenId,
-        address _recipient
-    ) external nonReentrant {
-        _checkRole(STRATEGY_ROLE, msg.sender);
-
-        MainNFTDeposit memory _deposit = mainDeposits[_collection][_tokenId];
-        if (!_deposit.isDeposited) revert Unauthorized();
-
-        Position memory _mainPosition = positions[_deposit.mainOrderNonce][
-            _caller
-        ];
-        Position memory _bakcPosition = positions[_deposit.bakcOrderNonce][
-            _caller
-        ];
-
-        if (!_mainPosition.isOwner || !_bakcPosition.isOwner)
-            revert Unauthorized();
-
-        Offer memory _mainOffer = offers[_deposit.mainOrderNonce];
-        Offer memory _bakcOffer = offers[_deposit.bakcOrderNonce];
-
-        if (
-            _mainOffer.offerType != OfferType.MAIN ||
-            _bakcOffer.offerType != OfferType.BAKC
-        ) revert Unauthorized();
-
-        uint256 _apeToSend;
-        (_mainPosition, _apeToSend) = _claimRewards(
-            _caller,
-            _deposit.mainOrderNonce,
-            _mainPosition,
-            _mainOffer
-        );
-
-        {
-            uint256 _tempApe;
-
-            (_bakcPosition, _tempApe) = _claimRewards(
-                _caller,
-                _deposit.bakcOrderNonce,
-                _bakcPosition,
-                _bakcOffer
-            );
-
-            _apeToSend += _tempApe;
-        }
-
-        _apeToSend += _mainPosition.apeAmount + _bakcPosition.apeAmount;
-        uint176 _apeToStake = (_mainOffer.apeAmount - _mainPosition.apeAmount) +
-            (_bakcOffer.apeAmount - _bakcPosition.apeAmount);
-
-        if (_mainOffer.apeAmount != 0)
-            _updateStakedApeAmountMain(
-                _mainOffer.apeAmount,
-                _collection,
-                _tokenId,
-                true
-            );
-
-        if (_bakcOffer.apeAmount != 0 && _bakcOffer.isPaired)
-            _unstakeApeBAKC(
-                _bakcOffer.apeAmount,
-                true,
-                _collection,
-                _tokenId,
-                _bakcOffer.bakcTokenId
-            );
-
-        if (_apeToStake != 0) {
-            SingleStakingPool memory _pool = singleStakingPool;
-            if (_pool.apeAmount != 0) {
-                (
-                    uint80 _additionalRewardsPerShare,
-
-                ) = _calculateAdditionalSingleSidedRewards(_pool.apeAmount);
-
-                _pool.rewardsPerShare += _additionalRewardsPerShare;
-            }
-
-            _mainOffer.lastSingleStakingRewardPerShare = _pool.rewardsPerShare;
-            _bakcOffer.lastSingleStakingRewardPerShare = _pool.rewardsPerShare;
-
-            APE_STAKING.depositApeCoin(_apeToStake, address(this));
-
-            _pool.apeAmount += _apeToStake;
-            singleStakingPool = _pool;
-        }
-
-        _mainOffer.apeAmount -= _mainPosition.apeAmount;
-        _mainOffer.offerType = OfferType.SINGLE_SIDE;
-        offers[_deposit.mainOrderNonce] = _mainOffer;
-
-        _bakcOffer.apeAmount -= _bakcPosition.apeAmount;
-        _bakcOffer.offerType = OfferType.SINGLE_SIDE;
-        offers[_deposit.bakcOrderNonce] = _bakcOffer;
-
-        //bakc position is not deleted because `_caller` might be the BAKC's owner
-        _bakcPosition.apeAmount = 0;
-        _bakcPosition.isOwner = false;
-        positions[_deposit.bakcOrderNonce][_caller] = _bakcPosition;
-
-        delete positions[_deposit.mainOrderNonce][_caller];
-        delete mainDeposits[_collection][_tokenId];
-
-        if (_apeToSend != 0) APE.transfer(_caller, _apeToSend);
-
-        if (_collection == Collections.BAYC)
-            BAYC.transferFrom(address(this), _recipient, _tokenId);
-        else MAYC.transferFrom(address(this), _recipient, _tokenId);
-    }
-
-    //check claim logic for when BAKC is staked but order has been cancelled
-    function withdrawBAKC(
-        address _caller,
-        uint16 _bakcTokenId,
-        address _recipient
-    ) external nonReentrant {
-        _checkRole(STRATEGY_ROLE, msg.sender);
-
-        BAKCDeposit memory _deposit = bakcDeposits[_bakcTokenId];
-        if (!_deposit.isDeposited) revert Unauthorized();
-
-        Position memory _position = positions[_deposit.orderNonce][_caller];
-
-        if (!_position.isBAKCOwner) revert Unauthorized();
-
-        Offer memory _offer = offers[_deposit.orderNonce];
-        if (
-            _offer.offerType != OfferType.BAKC &&
-            _offer.offerType != OfferType.SINGLE_SIDE
-        ) revert InvalidOffer(_deposit.orderNonce);
-
-        uint256 _apeToSend;
-        (_position, _apeToSend) = _claimRewards(
-            _caller,
-            _deposit.orderNonce,
-            _position,
-            _offer
-        );
-
-        if (_offer.offerType == OfferType.BAKC && _offer.apeAmount != 0)
-            _unstakeApeBAKC(
-                _offer.apeAmount,
-                true,
-                _offer.mainNft.collection,
-                _offer.mainNft.tokenId,
-                _bakcTokenId
-            );
-
-        _position.isBAKCOwner = false;
-        positions[_deposit.orderNonce][_caller] = _position;
-
-        _offer.isPaired = false;
-        _offer.bakcTokenId = 0;
-        offers[_deposit.orderNonce] = _offer;
-
-        delete bakcDeposits[_bakcTokenId];
-
-        if (_apeToSend > 0) APE.transfer(_caller, _apeToSend);
-
-        BAKC.transferFrom(address(this), _recipient, _bakcTokenId);
-    }
-
-    function depositBAKC(
+    /// @notice Allows strategies to deposit a BAKC to the offer with nonce `nonce`.
+    /// Can be called with action `ACTION_DEPOSIT_BAKC`
+    /// @param _caller The account the strategy is calling for
+    /// @param _nonce The nonce of the offer to deposit the BAKC to
+    /// @param _bakcTokenId The BAKC to deposit
+    /// @param _apeAmount The amount of ape to deposit with the BAKC. If not 0, has to be greater than `MIN_APE`. The
+    /// total amount of apecoin in the offer cannot be greater than `MAX_APE_BAKC`
+    function _depositBAKC(
         address _caller,
         uint24 _nonce,
         uint16 _bakcTokenId,
         uint80 _apeAmount
-    ) external nonReentrant {
-        _checkRole(STRATEGY_ROLE, msg.sender);
-
+    ) internal {
         Offer memory _offer = offers[_nonce];
 
         if (_offer.offerType != OfferType.BAKC || _offer.isPaired)
@@ -498,7 +582,7 @@ contract ApeMatchingMarketplace is
                 _bakcTokenId
             );
 
-            if (_stakedAmount > 0) revert BAKCAlreadyPaired(_bakcTokenId);
+            if (_stakedAmount != 0) revert InvalidNFT();
         }
 
         Position memory _position = positions[_nonce][_caller];
@@ -510,7 +594,7 @@ contract ApeMatchingMarketplace is
                 _offer.mainNft.collection
             );
 
-            APE.transferFrom(_caller, address(this), _apeAmount);
+            _transferApe(_caller, address(this), _apeAmount);
 
             _offer.apeAmount += _apeAmount;
             _position.apeAmount += _apeAmount;
@@ -534,129 +618,187 @@ contract ApeMatchingMarketplace is
         positions[_nonce][_caller] = _position;
         bakcDeposits[_bakcTokenId] = BAKCDeposit({
             isDeposited: true,
-            orderNonce: _nonce
+            offerNonce: _nonce
         });
 
         emit BAKCDeposited(_caller, _nonce, _bakcTokenId);
     }
 
-    function _depositApe(uint24 _nonce, uint80 _apeAmount) internal {
-        Offer memory _offer = offers[_nonce];
+    /// @notice Allows strategies to withdraw a BAYC/MAYC. The apecoin provided by the owner of the NFT
+    /// is refunded, the rest (if any) is staked into the apecoin single staking pool.
+    /// Can be called with action `ACTION_WITHDRAW_MAIN`
+    /// @param _caller The account the strategy is calling for
+    /// @param _collection The collection of the NFT to withdraw
+    /// @param _tokenId the NFT to withdraw
+    /// @param _recipient The address to send the NFT to (usually the vault). The apecoin is always sent to `_caller`
+    function _withdrawMain(
+        address _caller,
+        ApeStakingLib.Collections _collection,
+        uint16 _tokenId,
+        address _recipient
+    ) internal {
+        MainNFTDeposit memory _deposit = mainDeposits[_collection][_tokenId];
+        if (!_deposit.isDeposited) revert Unauthorized();
+
+        Position memory _mainPosition = positions[_deposit.mainOfferNonce][
+            _caller
+        ];
+        Position memory _bakcPosition = positions[_deposit.bakcOfferNonce][
+            _caller
+        ];
+
+        if (!_mainPosition.isOwner || !_bakcPosition.isOwner)
+            revert Unauthorized();
+
+        Offer memory _mainOffer = offers[_deposit.mainOfferNonce];
+        Offer memory _bakcOffer = offers[_deposit.bakcOfferNonce];
+
         if (
-            _offer.offerType != OfferType.MAIN &&
-            _offer.offerType != OfferType.BAKC
-        ) revert InvalidOffer(_nonce);
+            _mainOffer.offerType != OfferType.MAIN ||
+            _bakcOffer.offerType != OfferType.BAKC
+        ) revert Unauthorized();
 
-        _validateApeDeposit(
-            _apeAmount,
-            _offer.apeAmount,
-            _offer.offerType,
-            _offer.mainNft.collection
+        uint256 _apeToSend;
+        (_mainPosition, _apeToSend) = _claimRewards(
+            _caller,
+            _deposit.mainOfferNonce,
+            _mainPosition,
+            _mainOffer
         );
 
-        (Position memory _position, uint256 _rewards) = _claimRewards(
-            msg.sender,
-            _nonce,
-            positions[_nonce][msg.sender],
-            _offer
-        );
+        {
+            uint256 _tempApe;
 
-        if (_rewards > _apeAmount)
-            APE.transfer(msg.sender, _rewards - _apeAmount);
-        else APE.transferFrom(msg.sender, address(this), _apeAmount - _rewards);
-
-        if (_offer.offerType == OfferType.MAIN)
-            _updateStakedApeAmountMain(
-                _apeAmount,
-                _offer.mainNft.collection,
-                _offer.mainNft.tokenId,
-                false
-            );
-        else if (_offer.isPaired)
-            _stakeApeBAKC(
-                _apeAmount,
-                _offer.mainNft.collection,
-                _offer.mainNft.tokenId,
-                _offer.bakcTokenId
+            (_bakcPosition, _tempApe) = _claimRewards(
+                _caller,
+                _deposit.bakcOfferNonce,
+                _bakcPosition,
+                _bakcOffer
             );
 
-        _position.apeAmount += _apeAmount;
-        _offer.apeAmount += _apeAmount;
-
-        positions[_nonce][msg.sender] = _position;
-        offers[_nonce] = _offer;
-
-        emit ApeDeposited(msg.sender, _nonce, _apeAmount);
-    }
-
-    function _withdrawApe(uint24 _nonce, uint80 _apeAmount) internal {
-        Offer memory _offer = offers[_nonce];
-
-        (Position memory _position, uint256 _rewards) = _claimRewards(
-            msg.sender,
-            _nonce,
-            positions[_nonce][msg.sender],
-            _offer
-        );
-
-        if (_apeAmount < MIN_APE || _apeAmount > _position.apeAmount)
-            revert InvalidAmount();
-
-        unchecked {
-            _position.apeAmount -= _apeAmount;
+            _apeToSend += _tempApe;
         }
 
-        if (_position.apeAmount != 0 && _position.apeAmount < MIN_APE)
-            revert InvalidAmount();
+        _apeToSend += _mainPosition.apeAmount + _bakcPosition.apeAmount;
+        uint176 _apeToStake = (_mainOffer.apeAmount - _mainPosition.apeAmount) +
+            (_bakcOffer.apeAmount - _bakcPosition.apeAmount);
 
-        if (_offer.offerType == OfferType.MAIN)
-            _updateStakedApeAmountMain(
-                _apeAmount,
-                _offer.mainNft.collection,
-                _offer.mainNft.tokenId,
-                true
+        if (_mainOffer.apeAmount != 0)
+            _unstakeApeMain(_mainOffer.apeAmount, _collection, _tokenId);
+
+        if (_bakcOffer.apeAmount != 0 && _bakcOffer.isPaired)
+            _unstakeApeBAKC(
+                _bakcOffer.apeAmount,
+                true,
+                _collection,
+                _tokenId,
+                _bakcOffer.bakcTokenId
             );
-        else if (_offer.offerType == OfferType.BAKC) {
-            if (_offer.isPaired)
-                _unstakeApeBAKC(
-                    _apeAmount,
-                    _offer.apeAmount == _apeAmount,
-                    _offer.mainNft.collection,
-                    _offer.mainNft.tokenId,
-                    _offer.bakcTokenId
-                );
-        } else if (_offer.offerType == OfferType.SINGLE_SIDE) {
-            singleStakingPool.apeAmount -= _apeAmount;
-            APE_STAKING.withdrawApeCoin(_apeAmount, address(this));
+
+        if (_apeToStake != 0) {
+            SingleStakingPool memory _pool = singleStakingPool;
+            if (_pool.apeAmount != 0) {
+                (
+                    uint80 _additionalRewardsPerShare,
+                    bool _needsClaim
+                ) = _calculateAdditionalSingleSidedRewards(_pool.apeAmount);
+
+                if (_needsClaim) {
+                    _pool.rewardsPerShare += _additionalRewardsPerShare;
+                    APE_STAKING.claimApeCoin(address(this));
+                }
+            }
+
+            _mainOffer.lastSingleStakingRewardPerShare = _pool.rewardsPerShare;
+            _bakcOffer.lastSingleStakingRewardPerShare = _pool.rewardsPerShare;
+
+            APE_STAKING.depositApeCoin(_apeToStake, address(this));
+
+            _pool.apeAmount += _apeToStake;
+            singleStakingPool = _pool;
         }
 
-        _offer.apeAmount -= _apeAmount;
+        _mainOffer.apeAmount -= _mainPosition.apeAmount;
+        _mainOffer.offerType = OfferType.SINGLE_SIDE;
+        offers[_deposit.mainOfferNonce] = _mainOffer;
 
-        positions[_nonce][msg.sender] = _position;
-        offers[_nonce] = _offer;
+        _bakcOffer.apeAmount -= _bakcPosition.apeAmount;
+        _bakcOffer.offerType = OfferType.SINGLE_SIDE;
+        offers[_deposit.bakcOfferNonce] = _bakcOffer;
 
-        APE.transfer(msg.sender, _apeAmount + _rewards);
+        //bakc position is not deleted because `_caller` might be the BAKC's owner
+        _bakcPosition.apeAmount = 0;
+        _bakcPosition.isOwner = false;
+        positions[_deposit.bakcOfferNonce][_caller] = _bakcPosition;
 
-        emit ApeWithdrawn(msg.sender, _nonce, _apeAmount);
+        delete positions[_deposit.mainOfferNonce][_caller];
+        delete mainDeposits[_collection][_tokenId];
+
+        if (_apeToSend != 0) _transferApe(address(this), _caller, _apeToSend);
+
+        if (_collection == ApeStakingLib.Collections.BAYC)
+            _transferNFT(BAYC, address(this), _recipient, _tokenId);
+        else _transferNFT(MAYC, address(this), _recipient, _tokenId);
     }
 
-    function _claimRewards(uint24 _nonce) internal {
-        Offer memory _offer = offers[_nonce];
+    /// @notice Allows strategies to withdraw a BAKC.
+    /// Can be called with action `ACTION_WITHDRAW_BAKC`
+    /// @param _caller The account the strategy is calling for
+    /// @param _bakcTokenId The BAKC to withdraw
+    /// @param _recipient The address to send the BAKC to (usually the vault)
+    function _withdrawBAKC(
+        address _caller,
+        uint16 _bakcTokenId,
+        address _recipient
+    ) internal {
+        BAKCDeposit memory _deposit = bakcDeposits[_bakcTokenId];
+        if (!_deposit.isDeposited) revert Unauthorized();
 
-        (Position memory _position, uint256 _rewards) = _claimRewards(
-            msg.sender,
-            _nonce,
-            positions[_nonce][msg.sender],
+        Position memory _position = positions[_deposit.offerNonce][_caller];
+
+        if (!_position.isBAKCOwner) revert Unauthorized();
+
+        Offer memory _offer = offers[_deposit.offerNonce];
+        if (
+            _offer.offerType != OfferType.BAKC &&
+            _offer.offerType != OfferType.SINGLE_SIDE
+        ) revert InvalidOffer(_deposit.offerNonce);
+
+        uint256 _apeToSend;
+        (_position, _apeToSend) = _claimRewards(
+            _caller,
+            _deposit.offerNonce,
+            _position,
             _offer
         );
 
-        positions[_nonce][msg.sender] = _position;
+        if (_offer.offerType == OfferType.BAKC && _offer.apeAmount != 0)
+            _unstakeApeBAKC(
+                _offer.apeAmount,
+                true,
+                _offer.mainNft.collection,
+                _offer.mainNft.tokenId,
+                _bakcTokenId
+            );
 
-        if (_rewards == 0) revert NoRewards();
+        _position.isBAKCOwner = false;
+        positions[_deposit.offerNonce][_caller] = _position;
 
-        APE.transfer(msg.sender, _rewards);
+        _offer.isPaired = false;
+        _offer.bakcTokenId = 0;
+        offers[_deposit.offerNonce] = _offer;
+
+        delete bakcDeposits[_bakcTokenId];
+
+        if (_apeToSend > 0) _transferApe(address(this), _caller, _apeToSend);
+
+        _transferNFT(BAKC, address(this), _recipient, _bakcTokenId);
     }
 
+    //internal functions
+
+    /// @dev Claims rewards for the specified position and offer.
+    /// Has to be called every time the amount of deposited apecoin is updated
     function _claimRewards(
         address _caller,
         uint24 _nonce,
@@ -667,7 +809,7 @@ contract ApeMatchingMarketplace is
             _offer.offerType == OfferType.MAIN ||
             _offer.offerType == OfferType.BAKC
         ) {
-            OrderRewards memory _orderRewards = rewards[_nonce];
+            OfferRewards memory _offerRewards = rewards[_nonce];
 
             uint80 _newRewardsPerShare;
             uint80 _newOwnerRewards;
@@ -679,32 +821,40 @@ contract ApeMatchingMarketplace is
                 _newBAKCRewards,
                 _userRewards,
                 _needsClaim
-            ) = _calculateUpdatedRewardsData(_position, _orderRewards, _offer);
+            ) = _calculateUpdatedRewardsData(_position, _offerRewards, _offer);
 
             _position.lastRewardsPerShare = _newRewardsPerShare;
 
-            _orderRewards.rewardsPerShare = _newRewardsPerShare;
-            _orderRewards.ownerRewards = _newOwnerRewards;
-            _orderRewards.bakcRewards = _newBAKCRewards;
+            _offerRewards.rewardsPerShare = _newRewardsPerShare;
+            _offerRewards.ownerRewards = _newOwnerRewards;
+            _offerRewards.bakcRewards = _newBAKCRewards;
 
             if (_needsClaim) {
                 if (_offer.offerType == OfferType.MAIN)
-                    _claimApeMain(
-                        _offer.mainNft.collection,
-                        _offer.mainNft.tokenId
+                    _doApeStakingAction(
+                        ApeStakingLib.Actions.CLAIM,
+                        false,
+                        abi.encode(
+                            _offer.mainNft.collection,
+                            _offer.mainNft.tokenId
+                        )
                     );
                 else
-                    _claimApeBAKC(
-                        _offer.mainNft.collection,
-                        _offer.mainNft.tokenId,
-                        _offer.bakcTokenId
+                    _doApeStakingAction(
+                        ApeStakingLib.Actions.CLAIM,
+                        true,
+                        abi.encode(
+                            _offer.mainNft.collection,
+                            _offer.mainNft.tokenId,
+                            _offer.bakcTokenId
+                        )
                     );
             }
 
-            rewards[_nonce] = _orderRewards;
+            rewards[_nonce] = _offerRewards;
         } else if (_offer.offerType == OfferType.SINGLE_SIDE) {
             if (!_position.isSingleStaking) {
-                OrderRewards memory _orderRewards = rewards[_nonce];
+                OfferRewards memory _offerRewards = rewards[_nonce];
 
                 uint80 _updatedOwnerRewards;
                 uint80 _updatedBAKCRewards;
@@ -714,35 +864,35 @@ contract ApeMatchingMarketplace is
                     _userRewards
                 ) = _calculateUpdatedPositionRewards(
                     _position,
-                    _orderRewards.rewardsPerShare,
-                    _orderRewards.ownerRewards,
-                    _orderRewards.bakcRewards
+                    _offerRewards.rewardsPerShare,
+                    _offerRewards.ownerRewards,
+                    _offerRewards.bakcRewards
                 );
 
                 _position.isSingleStaking = true;
                 _position.lastRewardsPerShare = _offer
                     .lastSingleStakingRewardPerShare;
 
-                _orderRewards.ownerRewards = _updatedOwnerRewards;
-                _orderRewards.bakcRewards = _updatedBAKCRewards;
+                _offerRewards.ownerRewards = _updatedOwnerRewards;
+                _offerRewards.bakcRewards = _updatedBAKCRewards;
 
-                rewards[_nonce] = _orderRewards;
+                rewards[_nonce] = _offerRewards;
             }
 
             SingleStakingPool memory _pool = singleStakingPool;
-            uint80 _updatedRewardsPerShare;
             bool _needsClaim;
+            uint256 _tempRewards;
             (
-                _updatedRewardsPerShare,
-                _userRewards,
+                _position.lastRewardsPerShare,
+                _tempRewards,
                 _needsClaim
             ) = _calculateUpdatedSingleSidedRewardsData(_position, _pool);
 
-            _position.lastRewardsPerShare = _updatedRewardsPerShare;
+            _userRewards += _tempRewards;
             _position.isSingleStaking = true;
 
             if (_needsClaim) {
-                _pool.rewardsPerShare = _updatedRewardsPerShare;
+                _pool.rewardsPerShare = _position.lastRewardsPerShare;
 
                 APE_STAKING.claimApeCoin(address(this));
                 singleStakingPool = _pool;
@@ -755,9 +905,10 @@ contract ApeMatchingMarketplace is
         return (_position, _userRewards);
     }
 
+    /// @dev Calculates updated rewards data for the specified position and offer
     function _calculateUpdatedRewardsData(
         Position memory _position,
-        OrderRewards memory _orderRewards,
+        OfferRewards memory _offerRewards,
         Offer memory _offer
     )
         internal
@@ -777,7 +928,8 @@ contract ApeMatchingMarketplace is
         if (_offer.offerType == OfferType.MAIN) {
             _isStaked = _offer.apeAmount != 0;
             _tokenId = _offer.mainNft.tokenId;
-            _poolId = _offer.mainNft.collection == Collections.BAYC
+            _poolId = _offer.mainNft.collection ==
+                ApeStakingLib.Collections.BAYC
                 ? BAYC_POOL_ID
                 : MAYC_POOL_ID;
         } else {
@@ -801,7 +953,7 @@ contract ApeMatchingMarketplace is
             );
         }
 
-        _newRewardsPerShare += _orderRewards.rewardsPerShare;
+        _newRewardsPerShare += _offerRewards.rewardsPerShare;
 
         (
             _newOwnerRewards,
@@ -810,11 +962,12 @@ contract ApeMatchingMarketplace is
         ) = _calculateUpdatedPositionRewards(
             _position,
             _newRewardsPerShare,
-            _newOwnerRewards + _orderRewards.ownerRewards,
-            _newBAKCRewards + _orderRewards.bakcRewards
+            _newOwnerRewards + _offerRewards.ownerRewards,
+            _newBAKCRewards + _offerRewards.bakcRewards
         );
     }
 
+    /// @dev Calculates updated rewards data for the specified position in the single staking pool
     function _calculateUpdatedSingleSidedRewardsData(
         Position memory _position,
         SingleStakingPool memory _pool
@@ -843,6 +996,7 @@ contract ApeMatchingMarketplace is
         );
     }
 
+    /// @dev Creates an offer with the specified parameters
     function _createOffer(
         OfferType _offerType,
         address _owner,
@@ -894,17 +1048,18 @@ contract ApeMatchingMarketplace is
         emit OfferCreated(_owner, _nonce);
     }
 
+    /// @dev Validates apecoin deposits (min and max amounts)
     function _validateApeDeposit(
         uint80 _apeAmount,
         uint80 _totalApeAmount,
         OfferType _offerType,
-        Collections _collection
+        ApeStakingLib.Collections _collection
     ) internal pure {
         if (_apeAmount < MIN_APE) revert InvalidAmount();
 
         uint80 _maxApe;
         if (_offerType == OfferType.MAIN)
-            _maxApe = _collection == Collections.BAYC
+            _maxApe = _collection == ApeStakingLib.Collections.BAYC
                 ? MAX_APE_BAYC
                 : MAX_APE_MAYC;
         else if (_offerType == OfferType.BAKC) _maxApe = MAX_APE_BAKC;
@@ -914,6 +1069,7 @@ contract ApeMatchingMarketplace is
         if (_totalApeAmount > _maxApe) revert InvalidAmount();
     }
 
+    /// @dev Calculates updated rewards for the specified position (also applies NFT rewards)
     function _calculateUpdatedPositionRewards(
         Position memory _position,
         uint80 _rewardsPerShare,
@@ -942,6 +1098,7 @@ contract ApeMatchingMarketplace is
         else _updatedBAKCRewards = _bakcRewards;
     }
 
+    /// @dev Core rewards calculation based on shares
     function _calculateRewardsFromShares(
         uint80 _apeAmount,
         uint80 _rewardsPerShare,
@@ -953,6 +1110,7 @@ contract ApeMatchingMarketplace is
             REWARDS_PRECISION;
     }
 
+    /// @dev Calculates the additional rewards per share for the single sided pool
     function _calculateAdditionalSingleSidedRewards(
         uint176 _totalApe
     ) internal view returns (uint80, bool) {
@@ -971,6 +1129,7 @@ contract ApeMatchingMarketplace is
         );
     }
 
+    /// @dev Calculates the additional NFT rewards and rewards per share for a specific offer
     function _calculateAdditionalRewards(
         uint256 _apeStakingPoolId,
         uint80 _totalApe,
@@ -1020,119 +1179,88 @@ contract ApeMatchingMarketplace is
         }
     }
 
-    function _updateStakedApeAmountMain(
+    function _stakeApeMain(
         uint80 _apeAmount,
-        Collections _collection,
-        uint16 _tokenId,
-        bool _isUnstake
+        ApeStakingLib.Collections _collection,
+        uint16 _tokenId
     ) internal {
-        IApeStaking.SingleNft[] memory _toUpdate = new IApeStaking.SingleNft[](
-            1
+        _doApeStakingAction(
+            ApeStakingLib.Actions.DEPOSIT,
+            false,
+            abi.encode(_apeAmount, _collection, _tokenId)
         );
+    }
 
-        _toUpdate[0] = IApeStaking.SingleNft({
-            tokenId: _tokenId,
-            amount: _apeAmount
-        });
-
-        bool _isBAYC = _collection == Collections.BAYC;
-
-        if (_isUnstake) {
-            if (_isBAYC) APE_STAKING.withdrawBAYC(_toUpdate, address(this));
-            else APE_STAKING.withdrawMAYC(_toUpdate, address(this));
-        } else {
-            if (_isBAYC) APE_STAKING.depositBAYC(_toUpdate);
-            else APE_STAKING.depositMAYC(_toUpdate);
-        }
+    function _unstakeApeMain(
+        uint80 _apeAmount,
+        ApeStakingLib.Collections _collection,
+        uint16 _tokenId
+    ) internal {
+        _doApeStakingAction(
+            ApeStakingLib.Actions.WITHDRAW,
+            false,
+            abi.encode(_apeAmount, _collection, _tokenId)
+        );
     }
 
     function _stakeApeBAKC(
         uint80 _apeAmount,
-        Collections _collection,
+        ApeStakingLib.Collections _collection,
         uint16 _tokenId,
         uint16 _bakcTokenId
     ) internal {
-        IApeStaking.PairNftDepositWithAmount[]
-            memory _toDeposit = new IApeStaking.PairNftDepositWithAmount[](1);
-
-        _toDeposit[0] = IApeStaking.PairNftDepositWithAmount({
-            mainTokenId: _tokenId,
-            bakcTokenId: _bakcTokenId,
-            amount: _apeAmount
-        });
-
-        if (_collection == Collections.BAYC)
-            APE_STAKING.depositBAKC(
-                _toDeposit,
-                new IApeStaking.PairNftDepositWithAmount[](0)
-            );
-        else
-            APE_STAKING.depositBAKC(
-                new IApeStaking.PairNftDepositWithAmount[](0),
-                _toDeposit
-            );
+        _doApeStakingAction(
+            ApeStakingLib.Actions.DEPOSIT,
+            true,
+            abi.encode(_apeAmount, _collection, _tokenId, _bakcTokenId)
+        );
     }
 
     function _unstakeApeBAKC(
         uint80 _apeAmount,
         bool _isUncommit,
-        Collections _collection,
+        ApeStakingLib.Collections _collection,
         uint16 _tokenId,
         uint16 _bakcTokenId
     ) internal {
-        IApeStaking.PairNftWithdrawWithAmount[]
-            memory _toWithdraw = new IApeStaking.PairNftWithdrawWithAmount[](1);
-
-        _toWithdraw[0] = IApeStaking.PairNftWithdrawWithAmount({
-            mainTokenId: _tokenId,
-            bakcTokenId: _bakcTokenId,
-            amount: _apeAmount,
-            isUncommit: _isUncommit
-        });
-
-        if (_collection == Collections.BAYC)
-            APE_STAKING.withdrawBAKC(
-                _toWithdraw,
-                new IApeStaking.PairNftWithdrawWithAmount[](0)
-            );
-        else
-            APE_STAKING.withdrawBAKC(
-                new IApeStaking.PairNftWithdrawWithAmount[](0),
-                _toWithdraw
-            );
+        _doApeStakingAction(
+            ApeStakingLib.Actions.WITHDRAW,
+            true,
+            abi.encode(
+                _apeAmount,
+                _isUncommit,
+                _collection,
+                _tokenId,
+                _bakcTokenId
+            )
+        );
     }
 
-    function _claimApeMain(Collections _collection, uint16 _tokenId) internal {
-        uint256[] memory _toClaim = new uint256[](1);
-        _toClaim[0] = _tokenId;
-
-        if (_collection == Collections.BAYC)
-            APE_STAKING.claimBAYC(_toClaim, address(this));
-        else APE_STAKING.claimMAYC(_toClaim, address(this));
-    }
-
-    function _claimApeBAKC(
-        Collections _collection,
-        uint16 _tokenId,
-        uint16 _bakcTokenId
+    function _doApeStakingAction(
+        ApeStakingLib.Actions _action,
+        bool _isBAKC,
+        bytes memory _data
     ) internal {
-        IApeStaking.PairNft[] memory _toClaim = new IApeStaking.PairNft[](1);
-        _toClaim[0] = IApeStaking.PairNft({
-            mainTokenId: _tokenId,
-            bakcTokenId: _bakcTokenId
-        });
+        ApeStakingLib.doApeStakingAction(APE_STAKING, _action, _isBAKC, _data);
+    }
 
-        if (_collection == Collections.BAYC)
-            APE_STAKING.claimBAKC(
-                _toClaim,
-                new IApeStaking.PairNft[](0),
-                address(this)
-            );
-        else
-            APE_STAKING.claimBAKC(
-                new IApeStaking.PairNft[](0),
-                _toClaim,
-                address(this)
-            );
+    //saves bytecode size
+    function _transferNFT(
+        IERC721Upgradeable _nft,
+        address _sender,
+        address _recipient,
+        uint256 _tokenId
+    ) internal {
+        _nft.transferFrom(_sender, _recipient, _tokenId);
+    }
+
+    //saves bytecode size
+    function _transferApe(
+        address _sender,
+        address _recipient,
+        uint256 _amount
+    ) internal {
+        if (_sender == address(this)) APE.transfer(_recipient, _amount);
+        else APE.transferFrom(_sender, _recipient, _amount);
     }
 }

@@ -1,7 +1,7 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import chai from "chai";
 import { solidity } from "ethereum-waffle";
-import { BigNumber } from "ethers";
+import { BigNumber, BigNumberish } from "ethers";
 import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 import {
@@ -65,6 +65,104 @@ describe("ApeMatchingMarketplace", () => {
             .doActions([2], [abiCoder.encode(["uint24"], [nonce])]);
     }
 
+    function depositMain(
+        account: SignerWithAddress,
+        caller: string,
+        collection: number,
+        tokenId: number,
+        apeAmountMain: BigNumberish,
+        apeAmountBAKC: BigNumberish,
+        apeShareMain: number,
+        apeShareBAKC: number,
+        bakcShareBAKC: number
+    ) {
+        return marketplace
+            .connect(account)
+            .doStrategyActions(
+                caller,
+                [100],
+                [
+                    abiCoder.encode(
+                        [
+                            "uint8",
+                            "uint16",
+                            "uint80",
+                            "uint80",
+                            "uint16",
+                            "uint16",
+                            "uint16"
+                        ],
+                        [
+                            collection,
+                            tokenId,
+                            apeAmountMain,
+                            apeAmountBAKC,
+                            apeShareMain,
+                            apeShareBAKC,
+                            bakcShareBAKC
+                        ]
+                    )
+                ]
+            );
+    }
+
+    function depositBAKC(
+        account: SignerWithAddress,
+        caller: string,
+        nonce: number,
+        tokenId: number,
+        apeAmount: BigNumberish
+    ) {
+        return marketplace
+            .connect(account)
+            .doStrategyActions(
+                caller,
+                [101],
+                [
+                    abiCoder.encode(
+                        ["uint24", "uint16", "uint80"],
+                        [nonce, tokenId, apeAmount]
+                    )
+                ]
+            );
+    }
+
+    function withdrawMain(
+        account: SignerWithAddress,
+        caller: string,
+        collection: number,
+        tokenId: number,
+        recipient: string
+    ) {
+        return marketplace
+            .connect(account)
+            .doStrategyActions(
+                caller,
+                [102],
+                [
+                    abiCoder.encode(
+                        ["uint8", "uint16", "address"],
+                        [collection, tokenId, recipient]
+                    )
+                ]
+            );
+    }
+
+    function withdrawBAKC(
+        account: SignerWithAddress,
+        caller: string,
+        tokenId: number,
+        recipient: string
+    ) {
+        return marketplace
+            .connect(account)
+            .doStrategyActions(
+                caller,
+                [103],
+                [abiCoder.encode(["uint16", "address"], [tokenId, recipient])]
+            );
+    }
+
     beforeEach(async () => {
         const accounts = await ethers.getSigners();
         owner = accounts[0];
@@ -87,9 +185,14 @@ describe("ApeMatchingMarketplace", () => {
             bakc.address
         );
 
+        const ApeStakingLib = await ethers.getContractFactory("ApeStakingLib");
+        const lib = await ApeStakingLib.deploy();
+
         const Marketplace = await ethers.getContractFactory(
-            "ApeMatchingMarketplace"
+            "ApeMatchingMarketplace",
+            { libraries: { ApeStakingLib: lib.address } }
         );
+
         marketplace = <ApeMatchingMarketplace>await upgrades.deployProxy(
             Marketplace,
             [],
@@ -114,44 +217,34 @@ describe("ApeMatchingMarketplace", () => {
         await ape.connect(user).approve(marketplace.address, units(20));
 
         await expect(
-            marketplace
-                .connect(strategy)
-                .createOffers(
-                    user.address,
-                    { collection: 0, tokenId: 100 },
-                    units(10),
-                    0,
-                    0,
-                    0,
-                    0
-                )
+            depositMain(strategy, user.address, 0, 100, units(10), 0, 0, 0, 0)
         ).to.be.revertedWith("InvalidRewardShare()");
 
         await expect(
-            marketplace
-                .connect(strategy)
-                .createOffers(
-                    user.address,
-                    { collection: 0, tokenId: 100 },
-                    units(10),
-                    0,
-                    11000,
-                    0,
-                    0
-                )
-        ).to.be.revertedWith("InvalidRewardShare()");
-
-        await marketplace
-            .connect(strategy)
-            .createOffers(
+            depositMain(
+                strategy,
                 user.address,
-                { collection: 0, tokenId: 100 },
+                0,
+                100,
                 units(10),
                 0,
-                7_000,
-                7_000,
-                1_500
-            );
+                11000,
+                0,
+                0
+            )
+        ).to.be.revertedWith("InvalidRewardShare()");
+
+        await depositMain(
+            strategy,
+            user.address,
+            0,
+            100,
+            units(10),
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
 
         expect(await ape.balanceOf(user.address)).to.equal(units(10));
         expect(await ape.balanceOf(apeStaking.address)).to.equal(units(10));
@@ -194,23 +287,23 @@ describe("ApeMatchingMarketplace", () => {
         expect(bakcPosition.isSingleStaking).to.be.false;
 
         let deposit = await marketplace.mainDeposits(0, 100);
-        expect(deposit.mainOrderNonce).to.equal(0);
-        expect(deposit.bakcOrderNonce).to.equal(1);
+        expect(deposit.mainOfferNonce).to.equal(0);
+        expect(deposit.bakcOfferNonce).to.equal(1);
         expect(deposit.isDeposited).to.be.true;
 
         await mayc.mint(marketplace.address, 100);
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 1, tokenId: 100 },
-                0,
-                units(10),
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            100,
+            0,
+            units(10),
+            7_000,
+            7_000,
+            1_500
+        );
 
         expect(await ape.balanceOf(user.address)).to.equal(0);
         expect(await ape.balanceOf(apeStaking.address)).to.equal(units(10));
@@ -254,8 +347,8 @@ describe("ApeMatchingMarketplace", () => {
         expect(bakcPosition.isSingleStaking).to.be.false;
 
         deposit = await marketplace.mainDeposits(1, 100);
-        expect(deposit.mainOrderNonce).to.equal(2);
-        expect(deposit.bakcOrderNonce).to.equal(3);
+        expect(deposit.mainOfferNonce).to.equal(2);
+        expect(deposit.bakcOfferNonce).to.equal(3);
         expect(deposit.isDeposited).to.be.true;
     });
 
@@ -264,17 +357,17 @@ describe("ApeMatchingMarketplace", () => {
         await ape.mint(user.address, units(20));
         await ape.connect(user).approve(marketplace.address, units(20));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 1, tokenId: 100 },
-                0,
-                0,
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            100,
+            0,
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
 
         await expect(depositApe(user, 0, units(0.5))).to.be.revertedWith(
             "InvalidAmount()"
@@ -299,19 +392,21 @@ describe("ApeMatchingMarketplace", () => {
     it("should allow users to withdraw ape tokens", async () => {
         await bayc.mint(marketplace.address, 100);
         await ape.mint(user.address, units(20));
+        await ape.mint(owner.address, units(10));
         await ape.connect(user).approve(marketplace.address, units(20));
+        await ape.connect(owner).approve(marketplace.address, units(10));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 0, tokenId: 100 },
-                units(10),
-                0,
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            0,
+            100,
+            units(10),
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
 
         await expect(withdrawApe(user, 0, units(0.5))).to.be.revertedWith(
             "InvalidAmount()"
@@ -335,6 +430,14 @@ describe("ApeMatchingMarketplace", () => {
 
         let position = await marketplace.positions(0, user.address);
         expect(position.apeAmount).to.equal(0);
+
+        await bakc.mint(marketplace.address, 200);
+        await depositBAKC(strategy, owner.address, 1, 200, units(10));
+
+        await withdrawApe(owner, 1, units(10));
+        expect(await ape.balanceOf(owner.address)).to.equal(units(10));
+        expect(await ape.balanceOf(marketplace.address)).to.equal(0);
+        expect(await ape.balanceOf(apeStaking.address)).to.equal(0);
     });
 
     it("should allow the strategy to deposit BAKCs", async () => {
@@ -344,28 +447,24 @@ describe("ApeMatchingMarketplace", () => {
         await ape.connect(user).approve(marketplace.address, units(20));
         await ape.connect(owner).approve(marketplace.address, units(10));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 1, tokenId: 100 },
-                units(10),
-                units(10),
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            100,
+            units(10),
+            units(10),
+            7_000,
+            7_000,
+            1_500
+        );
 
         await bakc.mint(marketplace.address, 200);
         await expect(
-            marketplace
-                .connect(strategy)
-                .depositBAKC(owner.address, 0, 200, units(10))
+            depositBAKC(strategy, owner.address, 0, 200, units(10))
         ).to.be.revertedWith("InvalidOffer(0)");
 
-        await marketplace
-            .connect(strategy)
-            .depositBAKC(owner.address, 1, 200, units(10));
+        await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
         expect(await ape.balanceOf(owner.address)).to.equal(0);
         expect((await apeStaking.nftPosition(3, 200))[0]).to.equal(units(20));
@@ -382,7 +481,7 @@ describe("ApeMatchingMarketplace", () => {
 
         const deposit = await marketplace.bakcDeposits(200);
         expect(deposit.isDeposited).to.be.true;
-        expect(deposit.orderNonce).to.equal(1);
+        expect(deposit.offerNonce).to.equal(1);
     });
 
     it("should allow users to claim rewards", async () => {
@@ -392,24 +491,24 @@ describe("ApeMatchingMarketplace", () => {
         await ape.connect(user).approve(marketplace.address, units(10));
         await ape.connect(owner).approve(marketplace.address, units(10));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 0, tokenId: 100 },
-                0,
-                units(10),
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            0,
+            100,
+            0,
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
 
         await bakc.mint(marketplace.address, 200);
-        await marketplace
-            .connect(strategy)
-            .depositBAKC(owner.address, 1, 200, units(10));
+        await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
         await expect(claimRewards(user, 1)).to.be.revertedWith("NoRewards()");
+
+        await depositApe(user, 1, units(10));
 
         await apeStaking.setPendingRewards(
             3,
@@ -448,22 +547,20 @@ describe("ApeMatchingMarketplace", () => {
         await ape.connect(user).approve(marketplace.address, units(10));
         await ape.connect(owner).approve(marketplace.address, units(10));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 1, tokenId: 100 },
-                0,
-                units(10),
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            100,
+            0,
+            units(10),
+            7_000,
+            7_000,
+            1_500
+        );
 
         await bakc.mint(marketplace.address, 200);
-        await marketplace
-            .connect(strategy)
-            .depositBAKC(owner.address, 1, 200, units(10));
+        await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
         await apeStaking.setPendingRewards(
             3,
@@ -473,14 +570,14 @@ describe("ApeMatchingMarketplace", () => {
         );
 
         await expect(
-            marketplace
-                .connect(strategy)
-                .withdrawBAKC(user.address, 200, owner.address)
+            withdrawBAKC(strategy, user.address, 100, user.address)
         ).to.be.revertedWith("Unauthorized()");
 
-        await marketplace
-            .connect(strategy)
-            .withdrawBAKC(owner.address, 200, owner.address);
+        await expect(
+            withdrawBAKC(strategy, user.address, 200, owner.address)
+        ).to.be.revertedWith("Unauthorized()");
+
+        await withdrawBAKC(strategy, owner.address, 200, owner.address);
 
         expect((await apeStaking.nftPosition(3, 200))[0]).to.equal(0);
 
@@ -490,7 +587,7 @@ describe("ApeMatchingMarketplace", () => {
 
         const deposit = await marketplace.bakcDeposits(200);
         expect(deposit.isDeposited).to.be.false;
-        expect(deposit.orderNonce).to.equal(0);
+        expect(deposit.offerNonce).to.equal(0);
 
         const offer = await marketplace.offers(1);
         expect(offer.apeAmount).to.equal(units(20));
@@ -512,22 +609,20 @@ describe("ApeMatchingMarketplace", () => {
         await ape.connect(user).approve(marketplace.address, units(20));
         await ape.connect(owner).approve(marketplace.address, units(10));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 0, tokenId: 100 },
-                units(10),
-                units(10),
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            0,
+            100,
+            units(10),
+            units(10),
+            7_000,
+            7_000,
+            1_500
+        );
 
         await bakc.mint(marketplace.address, 200);
-        await marketplace
-            .connect(strategy)
-            .depositBAKC(owner.address, 1, 200, units(10));
+        await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
         await apeStaking.setPendingRewards(
             1,
@@ -543,14 +638,20 @@ describe("ApeMatchingMarketplace", () => {
             units(100)
         );
 
-        await marketplace
-            .connect(strategy)
-            .withdrawMainNFT(user.address, 0, 100, user.address);
+        await expect(
+            withdrawMain(strategy, user.address, 0, 1, user.address)
+        ).to.be.revertedWith("Unauthorized()");
+
+        await expect(
+            withdrawMain(strategy, owner.address, 0, 100, user.address)
+        ).to.be.revertedWith("Unauthorized()");
+
+        await withdrawMain(strategy, user.address, 0, 100, user.address);
 
         const deposit = await marketplace.mainDeposits(0, 100);
         expect(deposit.isDeposited).to.be.false;
-        expect(deposit.mainOrderNonce).to.equal(0);
-        expect(deposit.bakcOrderNonce).to.equal(0);
+        expect(deposit.mainOfferNonce).to.equal(0);
+        expect(deposit.bakcOfferNonce).to.equal(0);
 
         let offer = await marketplace.offers(0);
         expect(offer.offerType).to.equal(3);
@@ -571,10 +672,6 @@ describe("ApeMatchingMarketplace", () => {
         expect(position.apeAmount).to.equal(0);
         expect(position.isOwner).to.be.false;
 
-        const singleSide = await marketplace.singleStakingPool();
-        expect(singleSide.apeAmount).to.equal(units(10));
-        expect(singleSide.rewardsPerShare).to.equal(0);
-
         expect(await marketplace.pendingRewards(0, user.address)).to.equal(0);
         expect(await marketplace.pendingRewards(1, user.address)).to.equal(0);
         expect(await marketplace.pendingRewards(1, owner.address)).to.equal(
@@ -588,26 +685,24 @@ describe("ApeMatchingMarketplace", () => {
     it("should allow claiming from the single staking pool", async () => {
         await mayc.mint(marketplace.address, 100);
         await ape.mint(user.address, units(20));
-        await ape.mint(owner.address, units(10));
+        await ape.mint(owner.address, units(20));
         await ape.connect(user).approve(marketplace.address, units(20));
-        await ape.connect(owner).approve(marketplace.address, units(10));
+        await ape.connect(owner).approve(marketplace.address, units(20));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 1, tokenId: 100 },
-                units(10),
-                units(10),
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            100,
+            units(10),
+            units(10),
+            7_000,
+            7_000,
+            1_500
+        );
 
         await bakc.mint(marketplace.address, 200);
-        await marketplace
-            .connect(strategy)
-            .depositBAKC(owner.address, 1, 200, units(10));
+        await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
         await apeStaking.setPendingRewards(
             3,
@@ -616,9 +711,7 @@ describe("ApeMatchingMarketplace", () => {
             units(100)
         );
 
-        await marketplace
-            .connect(strategy)
-            .withdrawMainNFT(user.address, 1, 100, user.address);
+        await withdrawMain(strategy, user.address, 1, 100, user.address);
 
         expect(await mayc.ownerOf(100)).to.equal(user.address);
 
@@ -637,19 +730,82 @@ describe("ApeMatchingMarketplace", () => {
             units(150)
         );
 
+        await mayc
+            .connect(user)
+            .transferFrom(user.address, marketplace.address, 100);
+
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            100,
+            0,
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
+
+        await depositApe(owner, 2, units(10));
+
+        await withdrawMain(strategy, user.address, 1, 100, user.address);
+
+        expect(await marketplace.pendingRewards(1, owner.address)).to.equal(
+            units(150)
+        );
+
+        expect(await marketplace.pendingRewards(2, owner.address)).to.equal(0);
+
+        await apeStaking.setPendingRewards(
+            0,
+            marketplace.address,
+            0,
+            units(100)
+        );
+
+        expect(await marketplace.pendingRewards(1, owner.address)).to.equal(
+            units(200)
+        );
+
+        expect(await marketplace.pendingRewards(2, owner.address)).to.equal(
+            units(50)
+        );
+
         await claimRewards(owner, 1);
 
         expect(await marketplace.pendingRewards(1, owner.address)).to.equal(0);
 
-        const pool = await marketplace.singleStakingPool();
-        expect(pool.apeAmount).to.equal(units(10));
-        expect(pool.rewardsPerShare).to.equal(units(10));
+        expect(await marketplace.pendingRewards(2, owner.address)).to.equal(
+            units(50)
+        );
 
-        const position = await marketplace.positions(1, owner.address);
-        expect(position.apeAmount).to.equal(units(10));
-        expect(position.isBAKCOwner).to.be.true;
-        expect(position.lastRewardsPerShare).to.equal(units(10));
-        expect(position.isSingleStaking).to.be.true;
+        expect(await ape.balanceOf(owner.address)).to.equal(units(200));
+        expect(await ape.balanceOf(marketplace.address)).to.equal(units(50));
+
+        await claimRewards(owner, 2);
+
+        expect(await ape.balanceOf(owner.address)).to.equal(units(250));
+        expect(await ape.balanceOf(marketplace.address)).to.equal(0);
+
+        const position1 = await marketplace.positions(1, owner.address);
+        expect(position1.apeAmount).to.equal(units(10));
+        expect(position1.isBAKCOwner).to.be.true;
+        expect(position1.lastRewardsPerShare).to.equal(units(15));
+        expect(position1.isSingleStaking).to.be.true;
+
+        const position2 = await marketplace.positions(2, owner.address);
+        expect(position2.apeAmount).to.equal(units(10));
+        expect(position2.isBAKCOwner).to.be.false;
+        expect(position2.lastRewardsPerShare).to.equal(units(15));
+        expect(position2.isSingleStaking).to.be.true;
+
+        const offer1 = await marketplace.offers(1);
+        expect(offer1.apeAmount).to.equal(units(10));
+        expect(offer1.lastSingleStakingRewardPerShare).to.equal(0);
+
+        const offer2 = await marketplace.offers(2);
+        expect(offer2.apeAmount).to.equal(units(10));
+        expect(offer2.lastSingleStakingRewardPerShare).to.equal(units(10));
     });
 
     it("should allow withdrawing from the apecoin pool", async () => {
@@ -657,17 +813,17 @@ describe("ApeMatchingMarketplace", () => {
         await ape.mint(owner.address, units(10));
         await ape.connect(owner).approve(marketplace.address, units(10));
 
-        await marketplace
-            .connect(strategy)
-            .createOffers(
-                user.address,
-                { collection: 0, tokenId: 100 },
-                0,
-                0,
-                7_000,
-                7_000,
-                1_500
-            );
+        await depositMain(
+            strategy,
+            user.address,
+            0,
+            100,
+            0,
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
 
         await depositApe(owner, 0, units(10));
 
@@ -678,9 +834,7 @@ describe("ApeMatchingMarketplace", () => {
             units(100)
         );
 
-        await marketplace
-            .connect(strategy)
-            .withdrawMainNFT(user.address, 0, 100, user.address);
+        await withdrawMain(strategy, user.address, 0, 100, user.address);
 
         expect(await bayc.ownerOf(100)).to.equal(user.address);
 
@@ -706,13 +860,64 @@ describe("ApeMatchingMarketplace", () => {
         const offer = await marketplace.offers(0);
         expect(offer.apeAmount).to.equal(0);
 
-        const pool = await marketplace.singleStakingPool();
-        expect(pool.apeAmount).to.equal(0);
-        expect(pool.rewardsPerShare).to.equal(units(10));
-
         const position = await marketplace.positions(0, owner.address);
         expect(position.apeAmount).to.equal(0);
         expect(position.lastRewardsPerShare).to.equal(units(10));
         expect(position.isSingleStaking).to.be.true;
+    });
+
+    it("should allow the strategy to transfer NFTs", async () => {
+        await bayc.mint(marketplace.address, 100);
+        await mayc.mint(marketplace.address, 150);
+
+        await depositMain(
+            strategy,
+            user.address,
+            0,
+            100,
+            0,
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
+
+        await depositMain(
+            strategy,
+            user.address,
+            1,
+            150,
+            0,
+            0,
+            7_000,
+            7_000,
+            1_500
+        );
+
+        await bakc.mint(marketplace.address, 200);
+
+        await depositBAKC(strategy, user.address, 1, 200, 0);
+
+        await marketplace
+            .connect(strategy)
+            .doStrategyActions(
+                owner.address,
+                [104, 104, 105],
+                [
+                    abiCoder.encode(
+                        ["uint8", "uint16", "address"],
+                        [0, 100, owner.address]
+                    ),
+                    abiCoder.encode(
+                        ["uint8", "uint16", "address"],
+                        [1, 150, owner.address]
+                    ),
+                    abiCoder.encode(["uint16", "address"], [200, owner.address])
+                ]
+            );
+
+        expect(await bayc.ownerOf(100)).to.equal(owner.address);
+        expect(await mayc.ownerOf(150)).to.equal(owner.address);
+        expect(await bakc.ownerOf(200)).to.equal(owner.address);
     });
 });

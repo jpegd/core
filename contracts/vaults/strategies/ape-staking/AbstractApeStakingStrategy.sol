@@ -9,9 +9,9 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "@openzeppelin/contracts-upgradeable/proxy/ClonesUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 
-import "../../interfaces/IStandardNFTStrategy.sol";
-import "../../interfaces/IApeStaking.sol";
-import "../../interfaces/ISimpleUserProxy.sol";
+import "../../../interfaces/IStandardNFTStrategy.sol";
+import "../../../interfaces/IApeStaking.sol";
+import "../../../interfaces/ISimpleUserProxy.sol";
 
 abstract contract AbstractApeStakingStrategy is
     AccessControlUpgradeable,
