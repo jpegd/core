@@ -48,17 +48,17 @@ contract ApeMatchingMarketplace is
         uint256 amount
     );
 
-    event BAKCDeposited(
-        address indexed account,
-        uint256 indexed nonce,
-        uint256 indexed bakcId
-    );
-
     event MainWithdrawn(
         address indexed account,
         uint256 indexed nonce,
         uint256 indexed tokenId,
         ApeStakingLib.Collections collection
+    );
+
+    event BAKCDeposited(
+        address indexed account,
+        uint256 indexed nonce,
+        uint256 indexed bakcId
     );
 
     event BAKCWithdrawn(
@@ -754,7 +754,7 @@ contract ApeMatchingMarketplace is
 
         if (_apeToSend != 0) {
             _transferApe(address(this), _caller, _apeToSend);
-            
+
             emit ApeWithdrawn(_caller, _deposit.mainOfferNonce, _apeToSend);
         }
 
