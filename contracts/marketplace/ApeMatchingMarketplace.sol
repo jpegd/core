@@ -23,7 +23,12 @@ contract ApeMatchingMarketplace is
     error InvalidNFT();
     error UnknownAction(uint8 action);
 
-    event OfferCreated(address indexed owner, uint256 indexed nonce);
+    event OfferCreated(
+        address indexed owner,
+        uint256 indexed nonce,
+        uint256 indexed tokenId,
+        ApeStakingLib.Collections collection
+    );
 
     event ApeDeposited(
         address indexed account,
@@ -44,6 +49,19 @@ contract ApeMatchingMarketplace is
     );
 
     event BAKCDeposited(
+        address indexed account,
+        uint256 indexed nonce,
+        uint256 indexed bakcId
+    );
+
+    event MainWithdrawn(
+        address indexed account,
+        uint256 indexed nonce,
+        uint256 indexed tokenId,
+        ApeStakingLib.Collections collection
+    );
+
+    event BAKCWithdrawn(
         address indexed account,
         uint256 indexed nonce,
         uint256 indexed bakcId
@@ -734,11 +752,22 @@ contract ApeMatchingMarketplace is
         delete positions[_deposit.mainOfferNonce][_caller];
         delete mainDeposits[_collection][_tokenId];
 
-        if (_apeToSend != 0) _transferApe(address(this), _caller, _apeToSend);
+        if (_apeToSend != 0) {
+            _transferApe(address(this), _caller, _apeToSend);
+            
+            emit ApeWithdrawn(_caller, _deposit.mainOfferNonce, _apeToSend);
+        }
 
         if (_collection == ApeStakingLib.Collections.BAYC)
             _transferNFT(BAYC, address(this), _recipient, _tokenId);
         else _transferNFT(MAYC, address(this), _recipient, _tokenId);
+
+        emit MainWithdrawn(
+            _caller,
+            _deposit.mainOfferNonce,
+            _tokenId,
+            _collection
+        );
     }
 
     /// @notice Allows strategies to withdraw a BAKC.
@@ -793,6 +822,8 @@ contract ApeMatchingMarketplace is
         if (_apeToSend > 0) _transferApe(address(this), _caller, _apeToSend);
 
         _transferNFT(BAKC, address(this), _recipient, _bakcTokenId);
+
+        emit BAKCWithdrawn(_caller, _deposit.offerNonce, _bakcTokenId);
     }
 
     //internal functions
@@ -1045,7 +1076,7 @@ contract ApeMatchingMarketplace is
             isSingleStaking: false
         });
 
-        emit OfferCreated(_owner, _nonce);
+        emit OfferCreated(_owner, _nonce, _nft.tokenId, _nft.collection);
     }
 
     /// @dev Validates apecoin deposits (min and max amounts)
