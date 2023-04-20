@@ -162,7 +162,7 @@ contract ApeMatchingMarketplace is
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IERC721Upgradeable internal immutable BAKC;
 
-    uint24 internal nextNonce;
+    uint24 public nextNonce;
 
     SingleStakingPool internal singleStakingPool;
 
