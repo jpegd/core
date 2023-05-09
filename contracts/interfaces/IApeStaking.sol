@@ -40,6 +40,12 @@ interface IApeStaking {
         uint256 _nftId
     ) external view returns (uint248, bool);
 
+    function pendingRewards(
+        uint256 _poolId,
+        address _account,
+        uint256 _tokenId
+    ) external view returns (uint256);
+
     function depositBAYC(SingleNft[] calldata _nfts) external;
 
     function depositMAYC(SingleNft[] calldata _nfts) external;
@@ -63,6 +69,12 @@ interface IApeStaking {
         PairNftWithdrawWithAmount[] calldata _baycPairs,
         PairNftWithdrawWithAmount[] calldata _maycPairs
     ) external;
+
+    function withdrawApeCoin(uint256 _amount, address _recipient) external;
+
+    function depositApeCoin(uint256 _amount, address _recipient) external;
+
+    function claimApeCoin(address _recipient) external;
 
     function claimBAYC(uint256[] calldata _nfts, address _recipient) external;
 

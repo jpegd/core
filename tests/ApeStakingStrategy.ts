@@ -303,6 +303,11 @@ describe("ApeStakingStrategy", () => {
             strategy.claimRewards(toClaim, user.address)
         ).to.be.revertedWith("Unauthorized()");
 
+        await apeStaking.setPendingRewards(1, depositAddress, 0, units(1));
+        await apeStaking.setPendingRewards(1, depositAddress, 1, units(1));
+        await apeStaking.setPendingRewards(1, depositAddress, 2, units(1));
+        await apeStaking.setPendingRewards(1, depositAddress, 3, units(1));
+
         await strategy.connect(user).claimRewards(toClaim, user.address);
 
         expect(await ape.balanceOf(user.address)).to.equal(
@@ -528,6 +533,11 @@ describe("ApeStakingStrategy", () => {
                 user.address
             )
         ).to.be.reverted;
+
+        await apeStaking.setPendingRewards(3, depositAddress, 0, units(1));
+        await apeStaking.setPendingRewards(3, depositAddress, 1, units(1));
+        await apeStaking.setPendingRewards(3, depositAddress, 2, units(1));
+        await apeStaking.setPendingRewards(3, depositAddress, 3, units(1));
 
         await strategy.claimRewardsBAKC(
             user.address,

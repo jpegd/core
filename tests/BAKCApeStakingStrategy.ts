@@ -423,6 +423,9 @@ describe("BAKCApeStakingStrategy", () => {
             bakcStrategy.claimRewards(toClaim, user.address)
         ).to.be.revertedWith("Unauthorized()");
 
+        await apeStaking.setPendingRewards(3, depositAddress, 0, units(1));
+        await apeStaking.setPendingRewards(3, depositAddress, 1, units(1));
+
         await bakcStrategy.connect(user).claimRewards(toClaim, user.address);
 
         expect(await ape.balanceOf(user.address)).to.equal(
