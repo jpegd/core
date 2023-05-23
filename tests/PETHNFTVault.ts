@@ -129,7 +129,9 @@ describe("PETHNFTVault", () => {
             [10, 100],
             [8, 100],
             [10, 100],
-            0
+            [80, 100],
+            [81, 100],
+            86400
         ]);
 
         await jpegOraclesAggregator.addFloorOracle(

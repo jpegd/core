@@ -11,6 +11,10 @@ export const units = (value: number) =>
 export const bn = (value: BigNumberish) => ethers.BigNumber.from(value);
 export const days = (value: number) => value * 24 * 60 * 60;
 
+export const setNextTimestamp = async (newTimestamp: number) => {
+    await ethers.provider.send("evm_setNextBlockTimestamp", [newTimestamp]);
+};
+
 export const timeTravel = async (seconds: number) => {
     await ethers.provider.send("evm_increaseTime", [seconds]);
     await ethers.provider.send("evm_mine", []);
