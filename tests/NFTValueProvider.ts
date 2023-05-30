@@ -31,7 +31,6 @@ const traitBoostLockRate = [35, 100];
 const ltvBoostLockRate = [2_000, 10_000];
 const ltvRateCap = [80, 100];
 const liquidationRateCap = [81, 100];
-const locksDecayPeriod = 86400;
 
 const jpegPrice = bn("1000000000000000");
 const floor = units(50);
@@ -100,8 +99,7 @@ describe("NFTValueProvider", () => {
                 traitBoostLockRate,
                 ltvBoostLockRate,
                 ltvRateCap,
-                liquidationRateCap,
-                locksDecayPeriod
+                liquidationRateCap
             ])
         );
         await nftValueProvider.deployed();
@@ -271,7 +269,7 @@ describe("NFTValueProvider", () => {
             nftValueProvider.connect(user).withdrawTraitBoost(indexes)
         ).to.be.revertedWith("Unauthorized()");
 
-        await timeTravel(1000 + locksDecayPeriod);
+        await timeTravel(1000);
 
         expect(await nftValueProvider.getNFTValueETH(indexes[0])).to.equal(
             floor
@@ -390,7 +388,7 @@ describe("NFTValueProvider", () => {
             nftValueProvider.connect(user).withdrawLTVBoost(indexes)
         ).to.be.revertedWith("Unauthorized()");
 
-        await timeTravel(1000 + locksDecayPeriod);
+        await timeTravel(1000);
 
         creditLimitRate = await nftValueProvider.getCreditLimitRate(
             user.address,
@@ -518,142 +516,6 @@ describe("NFTValueProvider", () => {
         expect(await jpeg.balanceOf(nftValueProvider.address)).to.equal(
             ltvJpegAmount
         );
-    });
-
-    it("should decay LTV boosts linearly", async () => {
-        const index = 100;
-        const ltvBoostNumerator = 2000;
-
-        const ltvBoostRate = [
-            baseCreditLimitRate[0] * 10_000 +
-                ltvBoostNumerator * baseCreditLimitRate[1],
-            10_000 * baseCreditLimitRate[1]
-        ];
-        const baseCreditLimit = floor
-            .mul(baseCreditLimitRate[0])
-            .div(baseCreditLimitRate[1]);
-
-        const boostedCreditLimit = floor
-            .mul(ltvBoostRate[0])
-            .div(ltvBoostRate[1]);
-
-        const creditLimitIncrease = boostedCreditLimit.sub(baseCreditLimit);
-
-        const jpegAmount = creditLimitIncrease
-            .mul(ltvBoostLockRate[0])
-            .div(ltvBoostLockRate[1])
-            .mul(units(1))
-            .div(jpegPrice);
-
-        await jpeg.mint(user.address, jpegAmount);
-        await jpeg.connect(user).approve(nftValueProvider.address, jpegAmount);
-
-        const endTimestamp =
-            (await ethers.provider.getBlock("latest")).timestamp + 1000;
-
-        await nftValueProvider
-            .connect(user)
-            .applyLTVBoost([index], [endTimestamp], [ltvBoostNumerator]);
-
-        await setNextTimestamp(endTimestamp);
-        await mineBlock();
-
-        expect(
-            await nftValueProvider.getCreditLimitRate(user.address, index)
-        ).to.deep.equal([bn(ltvBoostRate[0]), bn(ltvBoostRate[1])]);
-
-        expect(
-            await nftValueProvider.getCreditLimitETH(user.address, index)
-        ).to.equal(boostedCreditLimit);
-
-        await setNextTimestamp(endTimestamp + locksDecayPeriod / 10);
-        await mineBlock();
-
-        expect(
-            await nftValueProvider.getCreditLimitETH(user.address, index)
-        ).to.equal(boostedCreditLimit.sub(creditLimitIncrease.div(10)));
-
-        await setNextTimestamp(endTimestamp + locksDecayPeriod / 2);
-        await mineBlock();
-
-        expect(
-            await nftValueProvider.getCreditLimitETH(user.address, index)
-        ).to.equal(boostedCreditLimit.sub(creditLimitIncrease.div(2)));
-
-        await setNextTimestamp(endTimestamp + (locksDecayPeriod * 9) / 10);
-        await mineBlock();
-
-        expect(
-            await nftValueProvider.getCreditLimitETH(user.address, index)
-        ).to.equal(boostedCreditLimit.sub(creditLimitIncrease.mul(9).div(10)));
-
-        await setNextTimestamp(endTimestamp + locksDecayPeriod);
-        await mineBlock();
-
-        expect(
-            await nftValueProvider.getCreditLimitETH(user.address, index)
-        ).to.equal(baseCreditLimit);
-    });
-
-    it("should decay trait boosts linearly", async () => {
-        const index = 100;
-
-        await nftValueProvider.setNFTTypeMultiplier(apeHash, {
-            numerator: 10,
-            denominator: 1
-        });
-        await nftValueProvider.setNFTType([index], apeHash);
-
-        const boostedValue = floor.mul(10);
-        const valueIncrease = boostedValue.sub(floor);
-        const jpegToLock = valueIncrease
-            .mul(traitBoostLockRate[0])
-            .div(traitBoostLockRate[1])
-            .mul(units(1))
-            .div(jpegPrice);
-
-        await jpeg.mint(user.address, jpegToLock);
-        await jpeg.connect(user).approve(nftValueProvider.address, jpegToLock);
-
-        const endTimestamp =
-            (await ethers.provider.getBlock("latest")).timestamp + 1000;
-
-        await nftValueProvider
-            .connect(user)
-            .applyTraitBoost([index], [endTimestamp]);
-
-        await setNextTimestamp(endTimestamp);
-        await mineBlock();
-
-        expect(await nftValueProvider.getNFTValueETH(index)).to.equal(
-            boostedValue
-        );
-
-        await setNextTimestamp(endTimestamp + locksDecayPeriod / 10);
-        await mineBlock();
-
-        expect(await nftValueProvider.getNFTValueETH(index)).to.equal(
-            boostedValue.sub(valueIncrease.div(10))
-        );
-
-        await setNextTimestamp(endTimestamp + locksDecayPeriod / 2);
-        await mineBlock();
-
-        expect(await nftValueProvider.getNFTValueETH(index)).to.equal(
-            boostedValue.sub(valueIncrease.div(2))
-        );
-
-        await setNextTimestamp(endTimestamp + (locksDecayPeriod * 9) / 10);
-        await mineBlock();
-
-        expect(await nftValueProvider.getNFTValueETH(index)).to.equal(
-            boostedValue.sub(valueIncrease.mul(9).div(10))
-        );
-
-        await setNextTimestamp(endTimestamp + locksDecayPeriod);
-        await mineBlock();
-
-        expect(await nftValueProvider.getNFTValueETH(index)).to.equal(floor);
     });
 
     it("should allow users to override trait locks", async () => {
