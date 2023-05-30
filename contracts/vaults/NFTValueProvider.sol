@@ -41,13 +41,13 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     event TraitBoostLockReleaseQueued(
         address indexed owner,
         uint256 indexed index,
-        uint256 _unlockTime
+        uint256 unlockTime
     );
 
     event LTVBoostLockReleaseQueued(
         address indexed owner,
         uint256 indexed index,
-        uint256 _unlockTime
+        uint256 unlockTime
     );
 
     event TraitBoostLockReleaseCancelled(
