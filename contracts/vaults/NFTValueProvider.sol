@@ -191,11 +191,14 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     function finalizeUpgrade(
         RateLib.Rate memory _creditLimitRateCap,
-        RateLib.Rate memory _liquidationLimitRateCap
+        RateLib.Rate memory _liquidationLimitRateCap,
+        uint256 _lockReleaseDelay
     ) external {
         if (
             creditLimitRateCap.denominator != 0 ||
-            liquidationLimitRateCap.denominator != 0
+            liquidationLimitRateCap.denominator != 0 || 
+            lockReleaseDelay != 0 ||
+            _lockReleaseDelay == 0 
         ) revert();
 
         _validateRateBelowOne(_creditLimitRateCap);
@@ -206,6 +209,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
         creditLimitRateCap = _creditLimitRateCap;
         liquidationLimitRateCap = _liquidationLimitRateCap;
+        lockReleaseDelay = _lockReleaseDelay;
     }
 
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
