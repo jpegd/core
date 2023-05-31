@@ -196,13 +196,13 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     ) external {
         if (
             creditLimitRateCap.denominator != 0 ||
-            liquidationLimitRateCap.denominator != 0 || 
+            liquidationLimitRateCap.denominator != 0 ||
             lockReleaseDelay != 0 ||
-            _lockReleaseDelay == 0 
+            _lockReleaseDelay == 0
         ) revert();
 
         _validateRateBelowOne(_creditLimitRateCap);
-        _validateRateBelowOne(liquidationLimitRateCap);
+        _validateRateBelowOne(_liquidationLimitRateCap);
 
         if (!_liquidationLimitRateCap.greaterThan(_creditLimitRateCap))
             revert RateLib.InvalidRate();
