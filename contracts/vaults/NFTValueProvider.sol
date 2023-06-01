@@ -25,37 +25,37 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     event DaoFloorChanged(uint256 newFloor);
 
-    event TraitBoostLock(
+    event TraitBoost(
         address indexed owner,
         uint256 indexed index,
         uint256 amount
     );
 
-    event LTVBoostLock(
+    event LTVBoost(
         address indexed owner,
         uint256 indexed index,
         uint256 amount,
         uint128 rateIncreaseBps
     );
 
-    event TraitBoostLockReleaseQueued(
+    event TraitBoostReleaseQueued(
         address indexed owner,
         uint256 indexed index,
         uint256 unlockTime
     );
 
-    event LTVBoostLockReleaseQueued(
+    event LTVBoostReleaseQueued(
         address indexed owner,
         uint256 indexed index,
         uint256 unlockTime
     );
 
-    event TraitBoostLockReleaseCancelled(
+    event TraitBoostReleaseCancelled(
         address indexed owner,
         uint256 indexed index
     );
 
-    event LTVBoostLockReleaseCancelled(
+    event LTVBoostReleaseCancelled(
         address indexed owner,
         uint256 indexed index
     );
@@ -357,6 +357,8 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     /// @notice Allows users to lock JPEG tokens to unlock the LTV boost for a single NFT.
     /// The LTV boost is an increase of an NFT's credit and liquidation limit rates.
+    /// The increase rate is specified by the user, capped at `jpegLockedMaxRateIncrease`.
+    /// LTV locks can be overridden by the lock owner without releasing them, provided that the specified rate increase is greater than the previous one. No JPEG is refunded in the process.
     /// The ETH value of the JPEG to lock is calculated by applying the `ltvBoostLockRate` rate to the difference between the new and the old credit limits.
     /// See {applyTraitBoost} for details on the locking and unlocking mechanism.
     /// @dev emits multiple {LTVBoostLock} events
@@ -590,7 +592,14 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             if (
                 _lock.owner != address(0) &&
                 (_lock.unlockAt == 0 || _lock.unlockAt > block.timestamp)
-            ) revert LockExists(_index);
+            ) {
+                if (
+                    _lock.owner != msg.sender ||
+                    !_rateIncrease.greaterThan(ltvBoostRateIncreases[_index])
+                ) revert LockExists(_index);
+                else if (_lock.lockedValue > _jpegToLock)
+                    _jpegToLock = _lock.lockedValue;
+            }
 
             if (_minLock > _jpegToLock) _jpegToLock = _minLock;
 
@@ -603,7 +612,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
             ltvBoostPositions[_index] = JPEGLock(msg.sender, 0, _jpegToLock);
             ltvBoostRateIncreases[_index] = _rateIncrease;
 
-            emit LTVBoostLock(
+            emit LTVBoost(
                 msg.sender,
                 _index,
                 _jpegToLock,
@@ -663,7 +672,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
             traitBoostPositions[_index] = JPEGLock(msg.sender, 0, _jpegToLock);
 
-            emit TraitBoostLock(msg.sender, _index, _jpegToLock);
+            emit TraitBoost(msg.sender, _index, _jpegToLock);
         }
 
         if (_requiredJPEG > _jpegToRefund)
@@ -692,20 +701,12 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
                 _lock = traitBoostPositions[_index];
                 traitBoostPositions[_index].unlockAt = _unlockTime;
 
-                emit TraitBoostLockReleaseQueued(
-                    _lock.owner,
-                    _index,
-                    _unlockTime
-                );
+                emit TraitBoostReleaseQueued(_lock.owner, _index, _unlockTime);
             } else {
                 _lock = ltvBoostPositions[_index];
                 ltvBoostPositions[_index].unlockAt = _unlockTime;
 
-                emit LTVBoostLockReleaseQueued(
-                    _lock.owner,
-                    _index,
-                    _unlockTime
-                );
+                emit LTVBoostReleaseQueued(_lock.owner, _index, _unlockTime);
             }
 
             if (_lock.owner != msg.sender || _lock.unlockAt != 0)
@@ -728,12 +729,12 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
                 _lock = traitBoostPositions[_index];
                 traitBoostPositions[_index].unlockAt = 0;
 
-                emit TraitBoostLockReleaseCancelled(_lock.owner, _index);
+                emit TraitBoostReleaseCancelled(_lock.owner, _index);
             } else {
                 _lock = ltvBoostPositions[_index];
                 ltvBoostPositions[_index].unlockAt = 0;
 
-                emit LTVBoostLockReleaseCancelled(_lock.owner, _index);
+                emit LTVBoostReleaseCancelled(_lock.owner, _index);
             }
 
             if (_lock.owner != msg.sender || block.timestamp >= _lock.unlockAt)
