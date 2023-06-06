@@ -310,7 +310,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 debt = position.liquidatedAt != 0
             ? position.debtAmountForRepurchase
             : _calculateDebt(
-                totalDebtAmount + _calculateAdditionalInterest(),
+                totalDebtAmount + calculateAdditionalInterest(),
                 position.debtPortion,
                 totalDebtPortion
             );
@@ -326,6 +326,27 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
+    /// @dev Calculates the additional global interest since last time the contract's state was updated by calling {accrue}
+    /// @return The additional interest value
+    function calculateAdditionalInterest() public view returns (uint256) {
+        // Number of seconds since {accrue} was called
+        uint256 elapsedTime = block.timestamp - totalDebtAccruedAt;
+        if (elapsedTime == 0) {
+            return 0;
+        }
+
+        uint256 totalDebt = totalDebtAmount;
+        if (totalDebt == 0) {
+            return 0;
+        }
+
+        // Accrue interest
+        return
+            (elapsedTime * totalDebt * settings.debtInterestApr.numerator) /
+            settings.debtInterestApr.denominator /
+            365 days;
+    }
+
     /// @return The whitelisted strategies for this vault.
     function getStrategies() external view returns (address[] memory) {
         return nftStrategies.values();
@@ -339,7 +360,7 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// @dev The {accrue} function updates the contract's state by calculating
     /// the additional interest accrued since the last state update
     function accrue() public {
-        uint256 additionalInterest = _calculateAdditionalInterest();
+        uint256 additionalInterest = calculateAdditionalInterest();
 
         totalDebtAccruedAt = block.timestamp;
 
@@ -1259,26 +1280,5 @@ contract PETHNFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _totalDebt
     ) internal pure returns (uint256) {
         return _total == 0 ? _userDebt : (_total * _userDebt) / _totalDebt;
-    }
-
-    /// @dev Calculates the additional global interest since last time the contract's state was updated by calling {accrue}
-    /// @return The additional interest value
-    function _calculateAdditionalInterest() internal view returns (uint256) {
-        // Number of seconds since {accrue} was called
-        uint256 elapsedTime = block.timestamp - totalDebtAccruedAt;
-        if (elapsedTime == 0) {
-            return 0;
-        }
-
-        uint256 totalDebt = totalDebtAmount;
-        if (totalDebt == 0) {
-            return 0;
-        }
-
-        // Accrue interest
-        return
-            (elapsedTime * totalDebt * settings.debtInterestApr.numerator) /
-            settings.debtInterestApr.denominator /
-            365 days;
     }
 }
