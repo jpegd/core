@@ -73,7 +73,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 indexed index,
         bool insured
     );
-    event Repurchased(address indexed owner, uint256 indexed index);
+    event LiquidationRepayment(
+        address indexed owner,
+        uint256 indexed index,
+        uint256 repayAmount
+    );
     event InsuranceExpired(address indexed owner, uint256 indexed index);
     event StrategyDeposit(
         uint256 indexed nftIndex,
@@ -423,15 +427,15 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             : BorrowType.NON_INSURANCE;
 
         uint256 _totalDebtPortion = totalDebtPortion;
-        if (_totalDebtPortion == 0) {
-            totalDebtPortion = _amount;
-            position.debtPortion = _amount;
-        } else {
-            uint256 _plusPortion = (_totalDebtPortion * _amount) /
-                _totalDebtAmount;
-            totalDebtPortion = _totalDebtPortion + _plusPortion;
-            position.debtPortion = _plusPortion;
-        }
+
+        uint256 _plusPortion = _calculatePortion(
+            _totalDebtPortion,
+            _amount,
+            _totalDebtAmount
+        );
+
+        totalDebtPortion = _totalDebtPortion + _plusPortion;
+        position.debtPortion = _plusPortion;
         position.debtPrincipal = _amount;
         totalDebtAmount = _totalDebtAmount + _amount;
 
@@ -548,8 +552,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /// the position had at the time of liquidation, plus an insurance liquidation fee defined with `insuranceLiquidationPenaltyRate`
     /// @dev Emits a {Repurchased} event
     /// @param _nftIndex The NFT to repurchase
-    function repurchase(uint256 _nftIndex) external nonReentrant {
-        _repurchase(msg.sender, _nftIndex);
+    function repurchase(
+        uint256 _nftIndex,
+        uint256 _repayAmount
+    ) external nonReentrant {
+        _repurchase(msg.sender, _nftIndex, _repayAmount);
     }
 
     /// @notice Allows the liquidator who liquidated the insured position with NFT at index `_nftIndex` to claim the position's collateral
@@ -707,8 +714,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
                 );
                 _liquidate(_account, nftIndex, recipient);
             } else if (action == ACTION_REPURCHASE) {
-                uint256 nftIndex = abi.decode(_data[i], (uint256));
-                _repurchase(_account, nftIndex);
+                (uint256 nftIndex, uint256 newDebtAmount) = abi.decode(
+                    _data[i],
+                    (uint256, uint256)
+                );
+                _repurchase(_account, nftIndex, newDebtAmount);
             } else if (action == ACTION_CLAIM_NFT) {
                 (uint256 nftIndex, address recipient) = abi.decode(
                     _data[i],
@@ -767,63 +777,67 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     ) internal {
         _validNFTIndex(_nftIndex);
 
-        address owner = positionOwner[_nftIndex];
-        if (owner != _account && owner != address(0)) revert Unauthorized();
+        address _owner = positionOwner[_nftIndex];
+        if (_owner != _account && _owner != address(0)) revert Unauthorized();
 
         if (_amount == 0) revert InvalidAmount(_amount);
 
-        if (totalDebtAmount + _amount > settings.borrowAmountCap)
+        uint256 _totalDebtAmount = totalDebtAmount;
+        if (_totalDebtAmount + _amount > settings.borrowAmountCap)
             revert DebtCapReached();
 
         Position storage position = positions[_nftIndex];
         if (position.liquidatedAt != 0) revert PositionLiquidated(_nftIndex);
 
-        BorrowType borrowType = position.borrowType;
-        BorrowType targetBorrowType = _useInsurance
+        BorrowType _borrowType = position.borrowType;
+        BorrowType _targetBorrowType = _useInsurance
             ? BorrowType.USE_INSURANCE
             : BorrowType.NON_INSURANCE;
 
-        if (borrowType == BorrowType.NOT_CONFIRMED)
-            position.borrowType = targetBorrowType;
-        else if (borrowType != targetBorrowType) revert InvalidInsuranceMode();
+        if (_borrowType == BorrowType.NOT_CONFIRMED)
+            position.borrowType = _targetBorrowType;
+        else if (_borrowType != _targetBorrowType)
+            revert InvalidInsuranceMode();
 
-        uint256 creditLimit = _getCreditLimit(_account, _nftIndex);
-        uint256 debtAmount = _getDebtAmount(_nftIndex);
-        if (debtAmount + _amount > creditLimit) revert InvalidAmount(_amount);
+        uint256 _creditLimit = _getCreditLimit(_account, _nftIndex);
+        uint256 _debtAmount = _getDebtAmount(_nftIndex);
+        if (_debtAmount + _amount > _creditLimit) revert InvalidAmount(_amount);
 
         //calculate the borrow fee
-        uint256 organizationFee = (_amount *
+        uint256 _organizationFee = (_amount *
             settings.organizationFeeRate.numerator) /
             settings.organizationFeeRate.denominator;
 
-        uint256 feeAmount = organizationFee;
+        uint256 _feeAmount = _organizationFee;
         //if the position is insured, calculate the insurance fee
-        if (targetBorrowType == BorrowType.USE_INSURANCE) {
-            feeAmount +=
+        if (_targetBorrowType == BorrowType.USE_INSURANCE) {
+            _feeAmount +=
                 (_amount * settings.insurancePurchaseRate.numerator) /
                 settings.insurancePurchaseRate.denominator;
         }
-        totalFeeCollected += feeAmount;
+        totalFeeCollected += _feeAmount;
 
-        uint256 debtPortion = totalDebtPortion;
         // update debt portion
-        if (debtPortion == 0) {
-            totalDebtPortion = _amount;
-            position.debtPortion = _amount;
-        } else {
-            uint256 plusPortion = (debtPortion * _amount) / totalDebtAmount;
-            totalDebtPortion = debtPortion + plusPortion;
-            position.debtPortion += plusPortion;
+        {
+            uint256 _totalDebtPortion = totalDebtPortion;
+            uint256 _plusPortion = _calculatePortion(
+                _totalDebtPortion,
+                _amount,
+                _totalDebtAmount
+            );
+
+            totalDebtPortion = _totalDebtPortion + _plusPortion;
+            position.debtPortion += _plusPortion;
+            position.debtPrincipal += _amount;
+            totalDebtAmount = _totalDebtAmount + _amount;
         }
-        position.debtPrincipal += _amount;
-        totalDebtAmount += _amount;
 
         if (positionOwner[_nftIndex] == address(0)) {
             _openPosition(_account, _nftIndex);
         }
 
         //subtract the fee from the amount borrowed
-        stablecoin.mint(_account, _amount - feeAmount);
+        stablecoin.mint(_account, _amount - _feeAmount);
 
         emit Borrowed(_account, _nftIndex, _amount, _useInsurance);
     }
@@ -843,33 +857,36 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         Position storage position = positions[_nftIndex];
         if (position.liquidatedAt > 0) revert PositionLiquidated(_nftIndex);
 
-        uint256 debtAmount = _getDebtAmount(_nftIndex);
-        if (debtAmount == 0) revert NoDebt();
+        uint256 _debtAmount = _getDebtAmount(_nftIndex);
+        if (_debtAmount == 0) revert NoDebt();
 
-        uint256 debtPrincipal = position.debtPrincipal;
-        uint256 debtInterest = debtAmount - debtPrincipal;
+        uint256 _debtPrincipal = position.debtPrincipal;
+        uint256 _debtInterest = _debtAmount - _debtPrincipal;
 
-        _amount = _amount > debtAmount ? debtAmount : _amount;
+        _amount = _amount > _debtAmount ? _debtAmount : _amount;
 
         // burn all payment, the interest is sent to the DAO using the {collect} function
         stablecoin.burnFrom(_account, _amount);
 
-        uint256 paidPrincipal;
+        uint256 _paidPrincipal;
 
         unchecked {
-            paidPrincipal = _amount > debtInterest ? _amount - debtInterest : 0;
+            _paidPrincipal = _amount > _debtInterest
+                ? _amount - _debtInterest
+                : 0;
         }
 
-        uint256 totalPortion = totalDebtPortion;
-        uint256 totalDebt = totalDebtAmount;
-        uint256 minusPortion = paidPrincipal == debtPrincipal
-            ? position.debtPortion
-            : (totalPortion * _amount) / totalDebt;
+        uint256 _totalDebtPortion = totalDebtPortion;
+        uint256 _totalDebtAmount = totalDebtAmount;
+        uint256 _debtPortion = position.debtPortion;
+        uint256 _minusPortion = _paidPrincipal == _debtPrincipal
+            ? _debtPortion
+            : _calculatePortion(_totalDebtPortion, _amount, _totalDebtAmount);
 
-        totalDebtPortion = totalPortion - minusPortion;
-        position.debtPortion -= minusPortion;
-        position.debtPrincipal -= paidPrincipal;
-        totalDebtAmount = totalDebt - _amount;
+        totalDebtPortion = _totalDebtPortion - _minusPortion;
+        position.debtPortion = _debtPortion - _minusPortion;
+        position.debtPrincipal = _debtPrincipal - _paidPrincipal;
+        totalDebtAmount = _totalDebtAmount - _amount;
 
         emit Repaid(_account, _nftIndex, _amount);
     }
@@ -950,39 +967,61 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @dev See {repurchase}
-    function _repurchase(address _account, uint256 _nftIndex) internal {
+    function _repurchase(
+        address _account,
+        uint256 _nftIndex,
+        uint256 _repayAmount
+    ) internal {
         _validNFTIndex(_nftIndex);
-
-        Position memory position = positions[_nftIndex];
         if (_account != positionOwner[_nftIndex]) revert Unauthorized();
-        if (position.liquidatedAt == 0) revert InvalidPosition(_nftIndex);
+
+        Position storage position = positions[_nftIndex];
+        uint256 _liquidatedAt = position.liquidatedAt;
+        if (_liquidatedAt == 0) revert InvalidPosition(_nftIndex);
         if (position.borrowType != BorrowType.USE_INSURANCE)
             revert InvalidPosition(_nftIndex);
         if (
             block.timestamp >=
-            position.liquidatedAt + settings.insuranceRepurchaseTimeLimit
+            _liquidatedAt + settings.insuranceRepurchaseTimeLimit
         ) revert PositionInsuranceExpired(_nftIndex);
 
-        uint256 debtAmount = position.debtAmountForRepurchase;
-        uint256 penalty = (debtAmount *
+        uint256 _debtAmount = position.debtAmountForRepurchase;
+        if (_repayAmount > _debtAmount || _repayAmount == 0)
+            revert InvalidAmount(_repayAmount);
+
+        uint256 _newDebtAmount = _debtAmount - _repayAmount;
+        uint256 _creditLimit = _getCreditLimit(_account, _nftIndex);
+        if (_newDebtAmount > _creditLimit) revert InvalidAmount(_repayAmount);
+
+        uint256 _penalty = (_debtAmount *
             settings.insuranceLiquidationPenaltyRate.numerator) /
             settings.insuranceLiquidationPenaltyRate.denominator;
 
-        // transfer nft to user
-        positionOwner[_nftIndex] = address(0);
-        delete positions[_nftIndex];
-        positionIndexes.remove(_nftIndex);
-
-        // transfer payment to liquidator
-        stablecoin.safeTransferFrom(
-            _account,
-            position.liquidator,
-            debtAmount + penalty
+        uint256 _totalDebtPortion = totalDebtPortion;
+        uint256 _totalDebtAmount = totalDebtAmount;
+        uint256 _plusPortion = _calculatePortion(
+            _totalDebtPortion,
+            _newDebtAmount,
+            _totalDebtAmount
         );
 
-        nftContract.safeTransferFrom(address(this), _account, _nftIndex);
+        totalDebtPortion = _totalDebtPortion + _plusPortion;
+        totalDebtAmount = _totalDebtAmount + _newDebtAmount;
+        position.debtPortion = _plusPortion;
+        position.debtPrincipal = _newDebtAmount;
+        delete position.debtAmountForRepurchase;
+        delete position.liquidatedAt;
 
-        emit Repurchased(_account, _nftIndex);
+        address _liquidator = position.liquidator;
+        delete position.liquidator;
+
+        totalFeeCollected += _penalty;
+
+        IStableCoin _stablecoin = stablecoin;
+        _stablecoin.burnFrom(_account, _repayAmount + _penalty);
+        _stablecoin.mint(_liquidator, _debtAmount);
+
+        emit LiquidationRepayment(_account, _nftIndex, _repayAmount);
     }
 
     /// @dev See {claimExpiredInsuranceNFT}
@@ -1225,6 +1264,14 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 totalPortion
     ) internal pure returns (uint256) {
         return totalPortion == 0 ? 0 : (total * userPortion) / totalPortion;
+    }
+
+    function _calculatePortion(
+        uint256 _total,
+        uint256 _userDebt,
+        uint256 _totalDebt
+    ) internal pure returns (uint256) {
+        return _total == 0 ? _userDebt : (_total * _userDebt) / _totalDebt;
     }
 
     /// @dev Calculates the additional global interest since last time the contract's state was updated by calling {accrue}

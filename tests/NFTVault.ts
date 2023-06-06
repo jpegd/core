@@ -8,7 +8,6 @@ import {
     FungibleAssetVaultForDAO,
     JPEG,
     MockV3Aggregator,
-    JPEGCardsCigStaking,
     NFTVault,
     StableCoin,
     TestERC20,
@@ -21,7 +20,8 @@ import {
     days,
     checkAlmostSame,
     currentTimestamp,
-    ZERO_ADDRESS
+    ZERO_ADDRESS,
+    bn
 } from "./utils";
 
 const { expect } = chai;
@@ -179,6 +179,7 @@ describe("NFTVault", () => {
         await stablecoin.revokeRole(default_admin_role, owner.address);
         await stablecoin.connect(dao).grantRole(minter_role, nftVault.address);
         await stablecoin.connect(dao).grantRole(minter_role, usdcVault.address);
+        await stablecoin.connect(dao).grantRole(minter_role, dao.address);
 
         await nftVault.grantRole(dao_role, dao.address);
         await nftVault.grantRole(liquidator_role, dao.address);
@@ -525,11 +526,11 @@ describe("NFTVault", () => {
     });
 
     it("should be able to repurchase", async () => {
-        await expect(nftVault.repurchase(10001)).to.be.revertedWith(
+        await expect(nftVault.repurchase(10001, 0)).to.be.revertedWith(
             "InvalidNFT(10001)"
         );
         await erc721.mint(owner.address, 1);
-        await expect(nftVault.repurchase(1)).to.be.revertedWith(
+        await expect(nftVault.repurchase(1, 0)).to.be.revertedWith(
             "Unauthorized()"
         );
 
@@ -542,20 +543,16 @@ describe("NFTVault", () => {
         const initialTimestamp = await currentTimestamp();
 
         await expect(
-            nftVault.connect(user).repurchase(index)
+            nftVault.connect(user).repurchase(index, 0)
         ).to.be.revertedWith("InvalidPosition(" + index + ")");
 
         // dao prepares 70000 PUSD
         const prepareAmount = units(70000);
-        await usdc.mint(dao.address, prepareAmount);
-        await usdc.connect(dao).approve(usdcVault.address, prepareAmount);
-        await usdcVault.connect(dao).deposit(prepareAmount);
-        await usdcVault.connect(dao).borrow(prepareAmount);
+        await stablecoin.connect(dao).mint(dao.address, prepareAmount);
 
-        // treat to change eth price
         await ethOracle.updateAnswer(100e8);
 
-        await stablecoin.connect(dao).approve(nftVault.address, units(70000));
+        await stablecoin.connect(dao).approve(nftVault.address, prepareAmount);
         await nftVault.connect(dao).liquidate(index, owner.address);
 
         const elapsed = (await currentTimestamp()) - initialTimestamp;
@@ -566,19 +563,50 @@ describe("NFTVault", () => {
                 .div(100)
                 .div(86400 * 365)
         );
-        const toRepurchase = totalDebt.add(totalDebt.mul(25).div(100));
-
-        await stablecoin.connect(dao).transfer(user.address, toRepurchase);
-        await stablecoin.connect(user).approve(nftVault.address, toRepurchase);
-
-        await nftVault.connect(user).repurchase(index);
 
         expect(
-            await stablecoin.allowance(user.address, nftVault.address)
-        ).to.be.closeTo(units(0), units(1) as any);
+            (await nftVault.positions(index)).debtAmountForRepurchase
+        ).to.equal(totalDebt);
 
-        expect(await nftVault.openPositionsIndexes()).to.deep.equal([]);
-        expect(await nftVault.totalPositions()).to.equal(0);
+        const creditLimit = await nftVault.getCreditLimit(user.address, index);
+        const repayAmount = totalDebt.sub(creditLimit);
+        const penalty = totalDebt.mul(25).div(100);
+
+        const amountBeforeRepurchase = await stablecoin.balanceOf(user.address);
+        const feeCollectedBeforeRepurchase = await nftVault.totalFeeCollected();
+
+        await stablecoin
+            .connect(dao)
+            .mint(user.address, repayAmount.add(penalty));
+        await stablecoin
+            .connect(user)
+            .approve(nftVault.address, repayAmount.add(penalty));
+
+        await expect(
+            nftVault.connect(user).repurchase(index, repayAmount.sub(1))
+        ).to.be.revertedWith(`InvalidAmount(${repayAmount.sub(1)})`);
+
+        await nftVault.connect(user).repurchase(index, repayAmount);
+
+        expect(await nftVault.openPositionsIndexes()).to.deep.equal([
+            bn(index)
+        ]);
+        expect(await nftVault.totalPositions()).to.equal(1);
+
+        const position = await nftVault.positions(index);
+
+        expect(position.debtPrincipal).to.equal(creditLimit);
+        expect(position.debtAmountForRepurchase).to.equal(0);
+        expect(position.liquidatedAt).to.equal(0);
+        expect(position.liquidator).to.equal(ZERO_ADDRESS);
+
+        expect(await stablecoin.balanceOf(dao.address)).to.equal(prepareAmount);
+        expect(await stablecoin.balanceOf(user.address)).to.equal(
+            amountBeforeRepurchase
+        );
+        expect(await nftVault.totalFeeCollected()).to.equal(
+            feeCollectedBeforeRepurchase.add(penalty)
+        );
     });
 
     it("should allow users to deposit NFTs in whitelisted strategies", async () => {
@@ -834,7 +862,7 @@ describe("NFTVault", () => {
         await timeTravel(86400 * 3);
 
         await expect(
-            nftVault.connect(user).repurchase(index)
+            nftVault.connect(user).repurchase(index, totalDebt)
         ).to.be.revertedWith("PositionInsuranceExpired(" + index + ")");
 
         await expect(
