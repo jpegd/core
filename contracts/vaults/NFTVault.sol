@@ -569,10 +569,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @notice Allows liquidated users who purchased insurance to repurchase their collateral within the time limit
-    /// defined with the `insuranceRepurchaseTimeLimit`. The user needs to pay the liquidator the total amount of debt
-    /// the position had at the time of liquidation, plus an insurance liquidation fee defined with `insuranceLiquidationPenaltyRate`
-    /// @dev Emits a {Repurchased} event
+    /// defined with the `insuranceRepurchaseTimeLimit`. The user needs to repay enough for the position's debt to fall below its credit limit,
+    /// plus an insurance liquidation fee defined with `insuranceLiquidationPenaltyRate`
+    /// @dev Emits a {LiquidationRepayment} event
     /// @param _nftIndex The NFT to repurchase
+    /// @param _repayAmount The amount of debt to repay. The new debt amount must be lower than the credit limit
     function repurchase(
         uint256 _nftIndex,
         uint256 _repayAmount
@@ -1287,6 +1288,11 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         return totalPortion == 0 ? 0 : (total * userPortion) / totalPortion;
     }
 
+    /// @dev Calculates the debt portion of a position given the global debt portion, the debt amount and the global debt amount
+    /// @param _total The total user portions of debt
+    /// @param _userDebt The user's debt
+    /// @param _totalDebt The global outstanding debt
+    /// @return _userDebt converted into a debt portion
     function _calculatePortion(
         uint256 _total,
         uint256 _userDebt,
