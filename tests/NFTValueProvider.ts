@@ -627,6 +627,10 @@ describe("NFTValueProvider", () => {
             )
         ).to.deep.equal(liquidationLimitRates);
 
+        await expect(
+            nftValueProvider.applyLTVBoost(indexes, rateIncreases)
+        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+
         await timeTravel(locksReleaseDelay);
 
         expect(

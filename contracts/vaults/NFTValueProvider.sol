@@ -589,10 +589,11 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
             uint256 _index = _nftIndexes[i];
             JPEGLock memory _lock = ltvBoostPositions[_index];
-            if (
-                _lock.owner != address(0) &&
-                (_lock.unlockAt == 0 || _lock.unlockAt > block.timestamp)
-            ) {
+
+            //prevent increasing ltv boost rate if lock is queued for withdrawal
+            if (_lock.unlockAt > block.timestamp) revert LockExists(_index);
+
+            if (_lock.owner != address(0) && _lock.unlockAt == 0) {
                 if (
                     _lock.owner != msg.sender ||
                     !_rateIncrease.greaterThan(ltvBoostRateIncreases[_index])
