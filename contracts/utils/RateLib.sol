@@ -29,6 +29,28 @@ library RateLib {
         return _rate.numerator == _rate.denominator;
     }
 
+    function greaterThan(
+        Rate memory _r1,
+        Rate memory _r2
+    ) internal pure returns (bool) {
+        return
+            _r1.numerator * _r2.denominator > _r2.numerator * _r1.denominator;
+    }
+
+    function sum(
+        Rate memory _r1,
+        Rate memory _r2
+    ) internal pure returns (Rate memory) {
+        return
+            Rate({
+                numerator: _r1.numerator *
+                    _r2.denominator +
+                    _r1.denominator *
+                    _r2.numerator,
+                denominator: _r1.denominator * _r2.denominator
+            });
+    }
+
     function calculate(
         Rate memory _rate,
         uint256 _num
