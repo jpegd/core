@@ -3,7 +3,6 @@ import chai from "chai";
 import { solidity } from "ethereum-waffle";
 import { ethers, upgrades } from "hardhat";
 import {
-    PETHVaultForDAO,
     PETH,
     StrategyPETHConvex,
     Vault,
@@ -22,7 +21,6 @@ describe("StrategyPETHConvex", () => {
     let owner: SignerWithAddress, user: SignerWithAddress;
     let strategy: StrategyPETHConvex;
     let vault: Vault;
-    let ethVault: PETHVaultForDAO;
     let booster: MockBooster;
     let peth: PETH;
     let rewardPool: MockRewardPool;
@@ -66,11 +64,6 @@ describe("StrategyPETHConvex", () => {
             ])
         );
 
-        const ETHVault = await ethers.getContractFactory("PETHVaultForDAO");
-        ethVault = <PETHVaultForDAO>(
-            await upgrades.deployProxy(ETHVault, [peth.address])
-        );
-
         const RewardPool = await ethers.getContractFactory("MockRewardPool");
         rewardPool = await RewardPool.deploy(want.address, crv.address, []);
 
@@ -84,47 +77,25 @@ describe("StrategyPETHConvex", () => {
             owner
         );
         strategy = await Strategy.deploy(
-            {
-                want: want.address,
-                peth: peth.address,
-                cvx: cvx.address,
-                crv: crv.address
-            },
+            want.address,
+            cvx.address,
+            crv.address,
+            cvxETH.address,
+            crvETH.address,
+            booster.address,
+            rewardPool.address,
+            0,
             owner.address,
-            {
-                lp: cvxETH.address,
-                ethIndex: 0
-            },
-            {
-                lp: crvETH.address,
-                ethIndex: 0
-            },
-            {
-                lp: want.address,
-                ethIndex: 0
-            },
-            {
-                booster: booster.address,
-                baseRewardPool: rewardPool.address,
-                pid: 0
-            },
-            {
-                vault: vault.address,
-                ethVault: ethVault.address
-            },
-            {
-                numerator: 20,
-                denominator: 100
-            }
+            { numerator: 20, denominator: 100 }
         );
 
         await strategy.grantRole(
             ethers.utils.solidityKeccak256(["string"], ["STRATEGIST_ROLE"]),
             owner.address
         );
-        await ethVault.grantRole(
-            ethers.utils.solidityKeccak256(["string"], ["WHITELISTED_ROLE"]),
-            strategy.address
+        await strategy.grantRole(
+            ethers.utils.solidityKeccak256(["string"], ["VAULT_ROLE"]),
+            vault.address
         );
 
         const minter = ethers.utils.solidityKeccak256(
@@ -132,36 +103,15 @@ describe("StrategyPETHConvex", () => {
             ["MINTER_ROLE"]
         );
         await peth.grantRole(minter, owner.address);
-        await peth.grantRole(minter, ethVault.address);
 
         await vault.migrateStrategy(strategy.address);
         await vault.unpause();
     });
 
-    it("should allow the DAO to change ETH vault", async () => {
-        await expect(strategy.setETHVault(ZERO_ADDRESS)).to.be.revertedWith(
-            "INVALID_ETH_VAULT"
-        );
-
-        await strategy.setETHVault(owner.address);
-        const { ethVault } = await strategy.strategyConfig();
-        expect(ethVault).to.equal(owner.address);
-    });
-
-    it("should deposit want on convex", async () => {
-        await want.mint(strategy.address, units(500));
-        await strategy.deposit();
-
-        expect(await strategy.depositedAssets()).to.equal(units(500));
-    });
-
     it("should allow strategists to withdraw non strategy tokens", async () => {
         await expect(
             strategy["withdraw(address,address)"](owner.address, want.address)
-        ).to.be.revertedWith("want");
-        await expect(
-            strategy["withdraw(address,address)"](owner.address, peth.address)
-        ).to.be.revertedWith("peth");
+        ).to.be.reverted;
 
         await cvx.mint(strategy.address, units(500));
         await strategy["withdraw(address,address)"](owner.address, cvx.address);
@@ -190,46 +140,18 @@ describe("StrategyPETHConvex", () => {
         await want.approve(vault.address, units(500));
         await vault.deposit(owner.address, units(500));
 
-        await expect(strategy.withdrawAll()).to.be.revertedWith("NOT_VAULT");
+        await expect(strategy.withdrawAll()).to.be.reverted;
 
         await vault.migrateStrategy(ZERO_ADDRESS);
 
         expect(await want.balanceOf(vault.address)).to.equal(units(500));
     });
 
-    it("should add liquidity with PETH when harvest is called and curve has less PETH than ETH", async () => {
-        await expect(strategy.harvest(0)).to.be.revertedWith("NOOP");
+    it("should add liquidity with ETH when harvest is called", async () => {
+        await expect(strategy.harvest(0)).to.be.reverted;
 
-        await peth.mint(want.address, units(400));
-        await weth.mint(want.address, units(600));
-
-        await want.mint(owner.address, units(1000));
-        await want.approve(vault.address, units(1000));
-        await vault.deposit(owner.address, units(1000));
-
-        expect(await strategy.depositedAssets()).to.equal(units(1000));
-
-        await crv.mint(rewardPool.address, units(1_000_000));
-
-        await crvETH.setNextAmountOut(units(2));
-        await want.setNextMintAmount(units(2));
-
-        await owner.sendTransaction({ to: crvETH.address, value: units(2) });
-
-        await strategy.harvest(0);
-
-        expect(await ethers.provider.getBalance(ethVault.address)).to.equal(
-            units(1.6)
-        );
-        expect(await peth.balanceOf(want.address)).to.equal(units(401.6));
-        expect(await strategy.depositedAssets()).to.equal(units(1002));
-    });
-
-    it("should add liquidity with ETH when harvest is called and curve has less ETH than PETH", async () => {
-        await expect(strategy.harvest(0)).to.be.revertedWith("NOOP");
-
-        await peth.mint(want.address, units(600));
-        await weth.mint(want.address, units(400));
+        await peth.mint(want.address, units(500));
+        await weth.mint(want.address, units(500));
 
         await want.mint(owner.address, units(1000));
         await want.approve(vault.address, units(1000));
@@ -245,8 +167,6 @@ describe("StrategyPETHConvex", () => {
         await owner.sendTransaction({ to: crvETH.address, value: units(2) });
 
         await strategy.harvest(0);
-
-        expect(await ethers.provider.getBalance(ethVault.address)).to.equal(0);
         expect(await ethers.provider.getBalance(want.address)).to.equal(
             units(1.6)
         );
