@@ -435,7 +435,7 @@ contract NFTValueProvider is
         _unlockJPEG(_nftIndexes, false);
     }
 
-    /// @notice Function called by the vaults during liquidation. Deletes all bosts for `_nftIndex` and burns the locked JPEG.
+    /// @notice Function called by the vaults during liquidation. Deletes all boosts for `_nftIndex` and burns the locked JPEG.
     /// @dev emits {TraitBoostLiquidated} and {LTVBoostLiquidated} when `_nftIndex` has active locks.
     /// @param _nftIndex The NFT that's getting liquidated.
     function onLiquidation(
