@@ -15,7 +15,8 @@ import {
     bn,
     timeTravel,
     setNextTimestamp,
-    currentTimestamp
+    currentTimestamp,
+    ZERO_ADDRESS
 } from "./utils";
 
 const { expect } = chai;
@@ -134,15 +135,14 @@ describe("NFTValueProvider", () => {
     });
 
     it("should allow the owner to set an nft type and its multiplier", async () => {
-        await expect(
-            nftValueProvider.connect(user).setNFTType([0], apeHash)
-        ).to.be.revertedWith("Ownable: caller is not the owner");
+        await expect(nftValueProvider.connect(user).setNFTType([0], apeHash)).to
+            .be.reverted;
         await expect(
             nftValueProvider.connect(user).setNFTTypeMultiplier(apeHash, {
                 numerator: 10,
                 denominator: 1
             })
-        ).to.be.revertedWith("Ownable: caller is not the owner");
+        ).to.be.reverted;
 
         await nftValueProvider.setNFTTypeMultiplier(apeHash, {
             numerator: 10,
@@ -930,11 +930,68 @@ describe("NFTValueProvider", () => {
         );
     });
 
+    it("should delete locks and burn jpeg when calling onLiquidation", async () => {
+        const nftIndex = 100;
+        const rateIncrease = 2000;
+
+        await nftValueProvider.setNFTTypeMultiplier(apeHash, {
+            numerator: 10,
+            denominator: 1
+        });
+        await nftValueProvider.setNFTType([nftIndex], apeHash);
+
+        const jpegAmount = await nftValueProvider
+            .calculateLTVBoostLock(jpegPrice, rateIncrease)
+            .then(a =>
+                nftValueProvider
+                    .calculateTraitBoostLock(apeHash, jpegPrice)
+                    .then(b => a.add(b))
+            );
+
+        await jpeg.mint(user.address, jpegAmount);
+        await jpeg.connect(user).approve(nftValueProvider.address, jpegAmount);
+
+        await nftValueProvider
+            .connect(user)
+            .applyLTVBoost([nftIndex], [rateIncrease]);
+        await nftValueProvider.connect(user).applyTraitBoost([nftIndex]);
+
+        await expect(nftValueProvider.onLiquidation(nftIndex)).to.be.reverted;
+
+        await nftValueProvider.grantRole(
+            ethers.utils.solidityKeccak256(["string"], ["VAULT_ROLE"]),
+            owner.address
+        );
+        await nftValueProvider.onLiquidation(nftIndex);
+
+        expect(
+            await jpeg.balanceOf(await nftValueProvider.BURN_ADDRESS())
+        ).to.equal(jpegAmount);
+        expect(
+            await nftValueProvider.traitBoostPositions(nftIndex)
+        ).to.have.property("owner", ZERO_ADDRESS);
+        expect(
+            await nftValueProvider.ltvBoostPositions(nftIndex)
+        ).to.have.property("owner", ZERO_ADDRESS);
+        expect(
+            await nftValueProvider.ltvBoostRateIncreases(nftIndex)
+        ).to.deep.equal([bn(0), bn(0)]);
+    });
+
     it("should allow the owner to override floor price", async () => {
         await nftValueProvider.overrideFloor(units(10));
         expect(await nftValueProvider.getFloorETH()).to.equal(units(10));
         expect(await nftValueProvider.getNFTValueETH(0)).to.equal(units(10));
         await nftValueProvider.disableFloorOverride();
         expect(await nftValueProvider.getNFTValueETH(0)).to.equal(floor);
+    });
+
+    it("should allow calling finalizeUpgrade only once", async () => {
+        await nftValueProvider.finalizeUpgrade(user.address);
+        await expect(nftValueProvider.finalizeUpgrade(user.address)).to.be
+            .reverted;
+
+        expect(await nftValueProvider.hasRole(zeroHash, user.address)).to.be
+            .true;
     });
 });
