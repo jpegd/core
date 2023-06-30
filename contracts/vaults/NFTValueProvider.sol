@@ -545,7 +545,7 @@ contract NFTValueProvider is
         _validateRateBelowOne(_creditLimitRate);
         if (baseCreditLimitRate.greaterThan(_creditLimitRate))
             revert RateLib.InvalidRate();
-        if (!baseLiquidationLimitRate.greaterThan(_creditLimitRate))
+        if (!liquidationLimitRateCap.greaterThan(_creditLimitRate))
             revert RateLib.InvalidRate();
 
         creditLimitRateCap = _creditLimitRate;
