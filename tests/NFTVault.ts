@@ -36,6 +36,8 @@ const dao_role =
     "0x3b5d4cc60d3ec3516ee8ae083bd60934f6eb2a6c54b1229985c41bfb092b2603";
 const liquidator_role =
     "0x5e17fc5225d4a099df75359ce1f405503ca79498a8dc46a7d583235a0ee45c16";
+const vault_role =
+    "0x31e0210044b4f6757ce6aa31f9c6e8d4896d24a755014887391a926c5224d959";
 const whitelisted_role =
     "0x8429d542926e6695b59ac6fbdcd9b37e8b1aeb757afab06ab60b1bb5878c3b49";
 const router_role =
@@ -190,6 +192,8 @@ describe("NFTVault", () => {
         await usdcVault.grantRole(default_admin_role, dao.address);
         await usdcVault.grantRole(whitelisted_role, dao.address);
         await usdcVault.revokeRole(default_admin_role, owner.address);
+
+        await nftValueProvider.grantRole(vault_role, nftVault.address);
     });
 
     it("should be able to borrow", async () => {

@@ -13,4 +13,6 @@ interface INFTValueProvider {
     ) external view returns (uint256);
 
     function getNFTValueETH(uint256 _nftIndex) external view returns (uint256);
+
+    function onLiquidation(uint256 _nftIndex) external;
 }

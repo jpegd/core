@@ -34,6 +34,8 @@ const minter_role =
     "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6";
 const dao_role =
     "0x3b5d4cc60d3ec3516ee8ae083bd60934f6eb2a6c54b1229985c41bfb092b2603";
+const vault_role =
+    "0x31e0210044b4f6757ce6aa31f9c6e8d4896d24a755014887391a926c5224d959";
 const liquidator_role =
     "0x5e17fc5225d4a099df75359ce1f405503ca79498a8dc46a7d583235a0ee45c16";
 const whitelisted_role =
@@ -186,6 +188,8 @@ describe("PETHNFTVault", () => {
         await ethVault.grantRole(default_admin_role, dao.address);
         await ethVault.grantRole(whitelisted_role, dao.address);
         await ethVault.revokeRole(default_admin_role, owner.address);
+
+        await nftValueProvider.grantRole(vault_role, nftVault.address);
     });
 
     it("should be able to borrow", async () => {

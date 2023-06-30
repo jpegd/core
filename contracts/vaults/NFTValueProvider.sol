@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
@@ -12,7 +12,10 @@ import "../interfaces/IUniswapV2Oracle.sol";
 import "../interfaces/IJPEGOraclesAggregator.sol";
 import "../interfaces/IJPEGCardsCigStaking.sol";
 
-contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
+contract NFTValueProvider is
+    ReentrancyGuardUpgradeable,
+    AccessControlUpgradeable
+{
     using RateLib for RateLib.Rate;
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
@@ -72,11 +75,28 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         uint256 amount
     );
 
+    event TraitBoostLiquidated(
+        address indexed owner,
+        uint256 indexed index,
+        uint256 amount
+    );
+
+    event LTVBoostLiquidated(
+        address indexed owner,
+        uint256 indexed index,
+        uint256 amount
+    );
+
     struct JPEGLock {
         address owner;
         uint256 unlockAt;
         uint256 lockedValue;
     }
+
+    bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
+
+    address public constant BURN_ADDRESS =
+        0x000000000000000000000000000000000000dEaD;
 
     /// @notice The JPEG floor oracles aggregator
     IJPEGOraclesAggregator public aggregator;
@@ -146,7 +166,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         RateLib.Rate calldata _liquidationLimitRateCap,
         uint256 _lockReleaseDelay
     ) external initializer {
-        __Ownable_init();
+        __AccessControl_init();
         __ReentrancyGuard_init();
 
         if (address(_jpeg) == address(0)) revert ZeroAddress();
@@ -174,6 +194,8 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         if (!_liquidationLimitRateCap.greaterThan(_creditLimitRateCap))
             revert RateLib.InvalidRate();
 
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+
         jpeg = _jpeg;
         aggregator = _aggregator;
         cigStaking = _cigStaking;
@@ -189,27 +211,13 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         minJPEGToLock = 1 ether;
     }
 
-    function finalizeUpgrade(
-        RateLib.Rate memory _creditLimitRateCap,
-        RateLib.Rate memory _liquidationLimitRateCap,
-        uint256 _lockReleaseDelay
-    ) external {
-        if (
-            creditLimitRateCap.denominator != 0 ||
-            liquidationLimitRateCap.denominator != 0 ||
-            lockReleaseDelay != 0 ||
-            _lockReleaseDelay == 0
-        ) revert();
+    function finalizeUpgrade(address _admin) external {
+        bytes32 _role = getRoleAdmin(keccak256("UPGRADE"));
+        if (_role != bytes32(0)) revert();
 
-        _validateRateBelowOne(_creditLimitRateCap);
-        _validateRateBelowOne(_liquidationLimitRateCap);
+        _setRoleAdmin(keccak256("UPGRADE"), keccak256("1"));
 
-        if (!_liquidationLimitRateCap.greaterThan(_creditLimitRateCap))
-            revert RateLib.InvalidRate();
-
-        creditLimitRateCap = _creditLimitRateCap;
-        liquidationLimitRateCap = _liquidationLimitRateCap;
-        lockReleaseDelay = _lockReleaseDelay;
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
     }
 
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
@@ -427,9 +435,46 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
         _unlockJPEG(_nftIndexes, false);
     }
 
+    /// @notice Function called by the vaults during liquidation. Deletes all boosts for `_nftIndex` and burns the locked JPEG.
+    /// @dev emits {TraitBoostLiquidated} and {LTVBoostLiquidated} when `_nftIndex` has active locks.
+    /// @param _nftIndex The NFT that's getting liquidated.
+    function onLiquidation(
+        uint256 _nftIndex
+    ) external nonReentrant onlyRole(VAULT_ROLE) {
+        uint256 _traitBoostLockedValue = traitBoostPositions[_nftIndex]
+            .lockedValue;
+        if (_traitBoostLockedValue != 0) {
+            emit TraitBoostLiquidated(
+                traitBoostPositions[_nftIndex].owner,
+                _nftIndex,
+                _traitBoostLockedValue
+            );
+            delete traitBoostPositions[_nftIndex];
+        }
+
+        uint256 _ltvBoostLockedValue = ltvBoostPositions[_nftIndex].lockedValue;
+        if (_ltvBoostLockedValue != 0) {
+            emit LTVBoostLiquidated(
+                ltvBoostPositions[_nftIndex].owner,
+                _nftIndex,
+                _ltvBoostLockedValue
+            );
+            delete ltvBoostPositions[_nftIndex];
+            delete ltvBoostRateIncreases[_nftIndex];
+        }
+
+        if (_traitBoostLockedValue != 0 || _ltvBoostLockedValue != 0)
+            jpeg.transfer(
+                BURN_ADDRESS,
+                _traitBoostLockedValue + _ltvBoostLockedValue
+            );
+    }
+
     /// @notice Allows the DAO to bypass the floor oracle and override the NFT floor value
     /// @param _newFloor The new floor
-    function overrideFloor(uint256 _newFloor) external onlyOwner {
+    function overrideFloor(
+        uint256 _newFloor
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newFloor == 0) revert InvalidAmount(_newFloor);
         overriddenFloorValueETH = _newFloor;
         daoFloorOverride = true;
@@ -438,7 +483,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     }
 
     /// @notice Allows the DAO to stop overriding floor
-    function disableFloorOverride() external onlyOwner {
+    function disableFloorOverride() external onlyRole(DEFAULT_ADMIN_ROLE) {
         daoFloorOverride = false;
     }
 
@@ -448,7 +493,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     function setNFTTypeMultiplier(
         bytes32 _type,
         RateLib.Rate calldata _multiplier
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_type == bytes32(0)) revert InvalidNFTType(_type);
         if (!_multiplier.isValid() || _multiplier.isBelowOne())
             revert RateLib.InvalidRate();
@@ -461,7 +506,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
     function setNFTType(
         uint256[] calldata _nftIndexes,
         bytes32 _type
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_type != bytes32(0) && nftTypeValueMultiplier[_type].numerator == 0)
             revert InvalidNFTType(_type);
 
@@ -472,7 +517,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     function setBaseCreditLimitRate(
         RateLib.Rate memory _baseCreditLimitRate
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_baseCreditLimitRate);
         if (_baseCreditLimitRate.greaterThan(creditLimitRateCap))
             revert RateLib.InvalidRate();
@@ -484,7 +529,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     function setBaseLiquidationLimitRate(
         RateLib.Rate memory _liquidationLimitRate
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_liquidationLimitRate);
         if (_liquidationLimitRate.greaterThan(liquidationLimitRateCap))
             revert RateLib.InvalidRate();
@@ -496,7 +541,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     function setCreditLimitRateCap(
         RateLib.Rate memory _creditLimitRate
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_creditLimitRate);
         if (baseCreditLimitRate.greaterThan(_creditLimitRate))
             revert RateLib.InvalidRate();
@@ -508,7 +553,7 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     function setLiquidationLimitRateCap(
         RateLib.Rate memory _liquidationLimitRate
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_liquidationLimitRate);
         if (baseLiquidationLimitRate.greaterThan(_liquidationLimitRate))
             revert RateLib.InvalidRate();
@@ -520,28 +565,28 @@ contract NFTValueProvider is ReentrancyGuardUpgradeable, OwnableUpgradeable {
 
     function setCigStakedRateIncrease(
         RateLib.Rate memory _cigStakedRateIncrease
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_cigStakedRateIncrease);
         cigStakedRateIncrease = _cigStakedRateIncrease;
     }
 
     function setJPEGLockedMaxRateIncrease(
         RateLib.Rate memory _jpegLockedRateIncrease
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_jpegLockedRateIncrease);
         jpegLockedMaxRateIncrease = _jpegLockedRateIncrease;
     }
 
     function setTraitBoostLockRate(
         RateLib.Rate memory _traitBoostLockRate
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_traitBoostLockRate);
         traitBoostLockRate = _traitBoostLockRate;
     }
 
     function setLTVBoostLockRate(
         RateLib.Rate memory _ltvBoostLockRate
-    ) external onlyOwner {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _validateRateBelowOne(_ltvBoostLockRate);
         ltvBoostLockRate = _ltvBoostLockRate;
     }

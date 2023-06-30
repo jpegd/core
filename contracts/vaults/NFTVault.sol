@@ -980,6 +980,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             positionOwner[_nftIndex] = address(0);
             delete positions[_nftIndex];
             positionIndexes.remove(_nftIndex);
+            nftValueProvider.onLiquidation(_nftIndex);
             if (address(strategy) == address(0))
                 nftContract.transferFrom(address(this), _recipient, _nftIndex);
             else strategy.withdraw(posOwner, _recipient, _nftIndex);
@@ -1069,6 +1070,7 @@ contract NFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         delete positions[_nftIndex];
         positionIndexes.remove(_nftIndex);
 
+        nftValueProvider.onLiquidation(_nftIndex);
         nftContract.transferFrom(address(this), _recipient, _nftIndex);
 
         emit InsuranceExpired(owner, _nftIndex);
