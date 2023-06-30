@@ -7,10 +7,13 @@ import "@openzeppelin/contracts-upgradeable/token/ERC721/IERC721Upgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/structs/EnumerableSetUpgradeable.sol";
 
+import "../utils/RateLib.sol";
+
 import "../interfaces/IJPEGCardsCigStaking.sol";
 
 contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using EnumerableSetUpgradeable for EnumerableSetUpgradeable.UintSet;
+    using RateLib for RateLib.Rate;
 
     event NewAuction(
         IERC721Upgradeable indexed nft,
@@ -22,8 +25,6 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         address indexed bidder,
         uint256 bidValue
     );
-    event JPEGDeposited(address indexed account, uint256 currentAmount);
-    event CardDeposited(address indexed account, uint256 index);
     event JPEGWithdrawn(address indexed account, uint256 amount);
     event CardWithdrawn(address indexed account, uint256 index);
     event NFTClaimed(uint256 indexed auctionId);
@@ -33,17 +34,10 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         uint256 bidValue
     );
     event BidTimeIncrementChanged(uint256 newTime, uint256 oldTime);
-    event JPEGLockAmountChanged(uint256 newLockAmount, uint256 oldLockAmount);
-    event LockDurationChanged(uint256 newDuration, uint256 oldDuration);
     event MinimumIncrementRateChanged(
-        Rate newIncrementRate,
-        Rate oldIncrementRate
+        RateLib.Rate newIncrementRate,
+        RateLib.Rate oldIncrementRate
     );
-
-    struct Rate {
-        uint128 numerator;
-        uint128 denominator;
-    }
 
     enum StakeMode {
         CIG,
@@ -71,40 +65,28 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     IERC20Upgradeable public jpeg;
     IERC721Upgradeable public cards;
-    IJPEGCardsCigStaking public cigStaking;
-    JPEGAuction public legacyAuction;
 
-    uint256 public lockDuration;
-    uint256 public jpegAmountNeeded;
+    address internal unused1;
+    address internal unused2;
+    uint256 internal unused3;
+    uint256 internal unused4;
+
     uint256 public bidTimeIncrement;
     uint256 public auctionsLength;
 
-    Rate public minIncrementRate;
+    RateLib.Rate public minIncrementRate;
 
     mapping(address => UserInfo) public userInfo;
     mapping(address => EnumerableSetUpgradeable.UintSet) internal userAuctions;
     mapping(uint256 => Auction) public auctions;
 
     function initialize(
-        IERC20Upgradeable _jpeg,
-        IERC721Upgradeable _cards,
-        IJPEGCardsCigStaking _cigStaking,
-        JPEGAuction _legacyAuction,
-        uint256 _jpegLockAmount,
-        uint256 _lockDuration,
         uint256 _bidTimeIncrement,
-        Rate memory _incrementRate
+        RateLib.Rate memory _incrementRate
     ) external initializer {
         __Ownable_init();
         __ReentrancyGuard_init();
 
-        jpeg = _jpeg;
-        cards = _cards;
-        cigStaking = _cigStaking;
-        legacyAuction = _legacyAuction;
-
-        setJPEGLockAmount(_jpegLockAmount);
-        setLockDuration(_lockDuration);
         setBidTimeIncrement(_bidTimeIncrement);
         setMinimumIncrementRate(_incrementRate);
     }
@@ -139,56 +121,6 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit NewAuction(_nft, _idx, _startTime);
     }
 
-    /// @notice Allows users to deposit (and lock) JPEG in this contract to get access to auctions.
-    /// The amount deposited is defined by the `jpegAmountNeeded`, which can be modified by the owner.
-    /// In case this happens, calling this function will correct the amount of jpeg deposited, either
-    /// increasing it or decreasing it to match the `jpegAmountNeeded` variable.
-    function correctDepositedJPEG() public nonReentrant {
-        UserInfo storage user = userInfo[msg.sender];
-        require(user.stakeMode != StakeMode.CARD, "STAKING_CARD");
-
-        uint256 stakedAmount = user.stakeArgument;
-        uint256 amountNeeded = jpegAmountNeeded;
-
-        require(stakedAmount != amountNeeded, "ALREADY_CORRECT");
-
-        user.stakeMode = StakeMode.JPEG;
-        user.stakeArgument = amountNeeded;
-
-        if (user.unlockTime == 0)
-            user.unlockTime = block.timestamp + lockDuration;
-
-        if (stakedAmount > amountNeeded)
-            jpeg.transfer(msg.sender, stakedAmount - amountNeeded);
-        else
-            jpeg.transferFrom(
-                msg.sender,
-                address(this),
-                amountNeeded - stakedAmount
-            );
-
-        emit JPEGDeposited(msg.sender, amountNeeded);
-    }
-
-    /// @notice Allows users to deposit (and lock) JPEG Cards in this contract to get access to auctions.
-    /// @param _idx The index of the Card to deposit
-    function depositCard(uint256 _idx) public nonReentrant {
-        UserInfo storage user = userInfo[msg.sender];
-        StakeMode stakeMode = user.stakeMode;
-        require(
-            stakeMode == StakeMode.CIG || stakeMode == StakeMode.LEGACY,
-            "ALREADY_STAKING"
-        );
-
-        user.stakeMode = StakeMode.CARD;
-        user.stakeArgument = _idx;
-        user.unlockTime = block.timestamp + lockDuration;
-
-        cards.transferFrom(msg.sender, address(this), _idx);
-
-        emit CardDeposited(msg.sender, _idx);
-    }
-
     /// @notice Allows users to bid on an auction. In case of multiple bids by the same user,
     /// the actual bid value is the sum of all bids.
     /// @param _auctionIndex The index of the auction to bid on
@@ -198,8 +130,6 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         require(block.timestamp >= auction.startTime, "NOT_STARTED");
         require(block.timestamp < endTime, "ENDED_OR_INVALID");
-
-        require(isAuthorized(msg.sender), "NOT_AUTHORIZED");
 
         uint256 previousBid = auction.bids[msg.sender];
         uint256 totalBid = msg.value + previousBid;
@@ -247,24 +177,6 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit NFTClaimed(_auctionIndex);
     }
 
-    /// @notice Allows users to deposit JPEG and bid on an auction.
-    /// @param _auctionIndex The auction to bid on.
-    function depositJPEGAndBid(uint256 _auctionIndex) external payable {
-        correctDepositedJPEG();
-        bid(_auctionIndex);
-    }
-
-    /// @notice Allows users to deposit a card and bid on an auction.
-    /// @param _auctionIndex The auction to bid on.
-    /// @param _idx The index of the card to deposit.
-    function depositCardAndBid(
-        uint256 _auctionIndex,
-        uint256 _idx
-    ) external payable {
-        depositCard(_idx);
-        bid(_auctionIndex);
-    }
-
     /// @notice Allows bidders to withdraw their bid. Only works if `msg.sender` isn't the highest bidder.
     /// @param _auctionIndex The auction to claim the bid from.
     function withdrawBid(uint256 _auctionIndex) public nonReentrant {
@@ -292,13 +204,10 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
-    /// @notice Allows users that deposited a Card to withdraw it, if unlocked.
+    /// @notice Allows users that deposited a Card in the previous JPEGAuction implementation to withdraw it.
     function withdrawCard() external nonReentrant {
         UserInfo memory user = userInfo[msg.sender];
         require(user.stakeMode == StakeMode.CARD, "CARD_NOT_DEPOSITED");
-        require(block.timestamp >= user.unlockTime, "LOCKED");
-
-        require(userAuctions[msg.sender].length() == 0, "ACTIVE_BIDS");
 
         delete userInfo[msg.sender];
 
@@ -309,13 +218,10 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit CardWithdrawn(msg.sender, cardIndex);
     }
 
-    /// @notice Allows users that deposited JPEG to withdraw it, if unlocked.
+    /// @notice Allows users that deposited JPEG in the previous JPEGAuction implementation to withdraw it.
     function withdrawJPEG() external nonReentrant {
         UserInfo memory user = userInfo[msg.sender];
         require(user.stakeMode == StakeMode.JPEG, "JPEG_NOT_DEPOSITED");
-        require(block.timestamp >= user.unlockTime, "LOCKED");
-
-        require(userAuctions[msg.sender].length() == 0, "ACTIVE_BIDS");
 
         delete userInfo[msg.sender];
 
@@ -324,28 +230,6 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         jpeg.transfer(msg.sender, jpegAmount);
 
         emit JPEGWithdrawn(msg.sender, jpegAmount);
-    }
-
-    /// @notice Allows users to renounce to LEGACY StakeMode.
-    /// Useful if they want to switch to CIG StakeMode without depositing JPEG/a Card.
-    function renounceLegacyStakeMode() external nonReentrant {
-        UserInfo storage user = userInfo[msg.sender];
-        require(user.stakeMode == StakeMode.LEGACY, "NOT_LEGACY");
-
-        delete userInfo[msg.sender];
-    }
-
-    /// @return Whether a user is authorized to bid or not.
-    /// @param _account The address to check.
-    function isAuthorized(address _account) public view returns (bool) {
-        StakeMode stakeMode = userInfo[_account].stakeMode;
-
-        if (stakeMode == StakeMode.CARD) return true;
-        else if (stakeMode == StakeMode.JPEG)
-            return userInfo[_account].stakeArgument >= jpegAmountNeeded;
-        else if (stakeMode == StakeMode.CIG)
-            return cigStaking.isUserStaking(_account);
-        else return legacyAuction.isAuthorized(_account);
     }
 
     /// @return The list of active bids for an account.
@@ -403,22 +287,6 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         );
     }
 
-    /// @notice Allows the owner to add accounts that are staking in the legacy contract
-    /// @param _accounts The accounts to add
-    function addLegacyAccounts(
-        address[] calldata _accounts
-    ) external onlyOwner {
-        for (uint256 i; i < _accounts.length; ++i) {
-            address account = _accounts[i];
-            require(
-                userInfo[account].stakeMode == StakeMode.CIG,
-                "ACCOUNT_ALREADY_STAKING"
-            );
-
-            userInfo[account].stakeMode = StakeMode.LEGACY;
-        }
-    }
-
     /// @notice Allows the owner to set the amount of time to increase an auction by if a bid happens in the last few minutes
     /// @param _newTime The new amount of time
     function setBidTimeIncrement(uint256 _newTime) public onlyOwner {
@@ -429,30 +297,10 @@ contract JPEGAuction is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         bidTimeIncrement = _newTime;
     }
 
-    /// @notice Allows the owner to set the amount of JPEG to lock to be able to participate in auctions.
-    /// @param _lockAmount The amount of JPEG.
-    function setJPEGLockAmount(uint256 _lockAmount) public onlyOwner {
-        require(_lockAmount > 0, "INVALID_LOCK_AMOUNT");
-
-        emit JPEGLockAmountChanged(_lockAmount, jpegAmountNeeded);
-
-        jpegAmountNeeded = _lockAmount;
-    }
-
-    /// @notice Allows the owner to set the duration of locks.
-    /// @param _newDuration The new lock duration
-    function setLockDuration(uint256 _newDuration) public onlyOwner {
-        require(_newDuration > 0, "INVALID_LOCK_DURATION");
-
-        emit LockDurationChanged(_newDuration, lockDuration);
-
-        lockDuration = _newDuration;
-    }
-
     /// @notice Allows the owner to set the minimum increment rate from the last highest bid.
     /// @param _newIncrementRate The new increment rate.
     function setMinimumIncrementRate(
-        Rate memory _newIncrementRate
+        RateLib.Rate memory _newIncrementRate
     ) public onlyOwner {
         require(
             _newIncrementRate.denominator != 0 &&
