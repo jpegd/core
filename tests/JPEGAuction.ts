@@ -4,11 +4,21 @@ import { solidity } from "ethereum-waffle";
 import { BigNumber } from "ethers";
 import { ethers, upgrades } from "hardhat";
 import { JPEGAuction } from "../types";
-import { timeTravel, units, ZERO_ADDRESS } from "./utils";
+import {
+    timeTravel,
+    units,
+    ZERO_ADDRESS,
+    currentTimestamp,
+    setNextTimestamp
+} from "./utils";
 
 const { expect } = chai;
 
 chai.use(solidity);
+
+const AUCTION_DURATION = 12 * 60 * 60;
+const TIME_INCREMENT = 600;
+const BID_INCREMENT_RATE = { numerator: 1, denominator: 100 };
 
 describe("JPEGAuction", () => {
     let owner: SignerWithAddress, user: SignerWithAddress;
@@ -22,16 +32,62 @@ describe("JPEGAuction", () => {
         const Auction = await ethers.getContractFactory("JPEGAuction");
         auction = <JPEGAuction>(
             await upgrades.deployProxy(Auction, [
-                600,
-                { numerator: 1, denominator: 100 }
+                AUCTION_DURATION,
+                TIME_INCREMENT,
+                BID_INCREMENT_RATE
             ])
         );
     });
 
-    it("should allow the owner to create a new auction", async () => {
+    it("should allow whitelisted addresses to create a new fixed time auction", async () => {
+        await expect(auction.newAuction(ZERO_ADDRESS, 0, 0)).to.be.revertedWith(
+            "AccessControl"
+        );
+        await auction.grantRole(
+            ethers.utils.solidityKeccak256(["string"], ["WHITELISTED_ROLE"]),
+            owner.address
+        );
+        await expect(auction.newAuction(ZERO_ADDRESS, 0, 0)).to.be.revertedWith(
+            "ZeroAddress"
+        );
+
+        const ERC721 = await ethers.getContractFactory("TestERC721");
+        const nft = await ERC721.deploy();
+        await nft.mint(owner.address, 1);
+
+        await nft.setApprovalForAll(auction.address, true);
+
+        await expect(auction.newAuction(nft.address, 1, 0)).to.be.revertedWith(
+            "InvalidAmount"
+        );
+
+        const nextTimestamp = (await currentTimestamp()) + 1;
+        await setNextTimestamp(nextTimestamp);
+
+        const minBid = units(1);
+
+        await auction.newAuction(nft.address, 1, minBid);
+
+        const auctionConfig = await auction.auctions(0);
+
+        const nextSlot =
+            nextTimestamp +
+            AUCTION_DURATION -
+            (nextTimestamp % AUCTION_DURATION);
+
+        expect(auctionConfig.nftAddress).to.equal(nft.address);
+        expect(auctionConfig.nftIndex).to.equal(1);
+        expect(auctionConfig.startTime).to.equal(nextSlot);
+        expect(auctionConfig.endTime).to.equal(nextSlot + AUCTION_DURATION);
+        expect(auctionConfig.minBid).to.equal(minBid);
+        expect(auctionConfig.highestBidOwner).to.equal(ZERO_ADDRESS);
+        expect(auctionConfig.ownerClaimed).to.be.false;
+    });
+
+    it("should allow the admin to create a new custom auction", async () => {
         await expect(
-            auction.newAuction(ZERO_ADDRESS, 0, 0, 0, 0)
-        ).to.be.revertedWith("INVALID_NFT");
+            auction.newCustomAuction(ZERO_ADDRESS, 0, 0, 0, 0)
+        ).to.be.revertedWith("ZeroAddress");
 
         const ERC721 = await ethers.getContractFactory("TestERC721");
         const nft = await ERC721.deploy();
@@ -40,25 +96,31 @@ describe("JPEGAuction", () => {
         await nft.setApprovalForAll(auction.address, true);
 
         await expect(
-            auction.newAuction(nft.address, 1, 0, 0, 0)
-        ).to.be.revertedWith("INVALID_START_TIME");
+            auction.newCustomAuction(nft.address, 1, 0, 0, 0)
+        ).to.be.revertedWith("InvalidAmount");
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
         await expect(
-            auction.newAuction(nft.address, 1, currentTimestamp + 100, 0, 0)
-        ).to.be.revertedWith("INVALID_END_TIME");
+            auction.newCustomAuction(
+                nft.address,
+                1,
+                currentTimestamp + 100,
+                0,
+                0
+            )
+        ).to.be.revertedWith("InvalidAmount");
         await expect(
-            auction.newAuction(
+            auction.newCustomAuction(
                 nft.address,
                 1,
                 currentTimestamp + 100,
                 currentTimestamp + 1000,
                 0
             )
-        ).to.be.revertedWith("INVALID_MIN_BID");
+        ).to.be.revertedWith("InvalidAmount");
 
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
@@ -78,8 +140,11 @@ describe("JPEGAuction", () => {
     });
 
     it("should allow users to bid", async () => {
+        const initialBid = units(1);
+        let minBid = initialBid;
+
         await expect(auction.connect(user).bid(0)).to.be.revertedWith(
-            "ENDED_OR_INVALID"
+            "Unauthorized"
         );
 
         const ERC721 = await ethers.getContractFactory("TestERC721");
@@ -90,39 +155,47 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
             currentTimestamp + 1000,
-            units(1)
+            minBid
         );
 
         await expect(auction.connect(user).bid(0)).to.be.revertedWith(
-            "NOT_STARTED"
+            "Unauthorized"
         );
 
         await timeTravel(100);
 
         await expect(
-            auction.connect(user).bid(0, { value: units(0.5) })
-        ).to.be.revertedWith("INVALID_BID");
+            auction.connect(user).bid(0, { value: minBid.sub(1) })
+        ).to.be.revertedWith("InvalidBid");
 
-        await auction.connect(user).bid(0, { value: units(1) });
+        await auction.connect(user).bid(0, { value: minBid });
 
         expect((await auction.auctions(0)).highestBidOwner).to.equal(
             user.address
         );
-        expect(await auction.getAuctionBid(0, user.address)).to.equal(units(1));
+        expect(await auction.getAuctionBid(0, user.address)).to.equal(minBid);
         expect(await auction.getActiveBids(user.address)).to.deep.equal([
             BigNumber.from(0)
         ]);
 
-        await expect(
-            auction.bid(0, { value: units(1.009) })
-        ).to.be.revertedWith("INVALID_BID");
+        minBid = minBid.add(
+            minBid
+                .mul(BID_INCREMENT_RATE.numerator)
+                .div(BID_INCREMENT_RATE.denominator)
+        );
 
-        await auction.bid(0, { value: units(1.01) });
+        await expect(
+            auction.bid(0, {
+                value: minBid.sub(1)
+            })
+        ).to.be.revertedWith("InvalidBid");
+
+        await auction.bid(0, { value: minBid });
         expect(await auction.getActiveBids(owner.address)).to.deep.equal([
             BigNumber.from(0)
         ]);
@@ -130,21 +203,24 @@ describe("JPEGAuction", () => {
         expect((await auction.auctions(0)).highestBidOwner).to.equal(
             owner.address
         );
-        expect(await auction.getAuctionBid(0, owner.address)).to.equal(
-            units(1.01)
-        );
+        expect(await auction.getAuctionBid(0, owner.address)).to.equal(minBid);
 
+        minBid = minBid.add(
+            minBid
+                .mul(BID_INCREMENT_RATE.numerator)
+                .div(BID_INCREMENT_RATE.denominator)
+        );
         await expect(
-            auction.connect(user).bid(0, { value: units(0.01) })
-        ).to.be.revertedWith("INVALID_BID");
-        await auction.connect(user).bid(0, { value: units(0.05) });
+            auction
+                .connect(user)
+                .bid(0, { value: minBid.sub(initialBid).sub(1) })
+        ).to.be.revertedWith("InvalidBid");
+        await auction.connect(user).bid(0, { value: minBid.sub(initialBid) });
 
         expect((await auction.auctions(0)).highestBidOwner).to.equal(
             user.address
         );
-        expect(await auction.getAuctionBid(0, user.address)).to.equal(
-            units(1.05)
-        );
+        expect(await auction.getAuctionBid(0, user.address)).to.equal(minBid);
 
         expect(await auction.getActiveBids(user.address)).to.deep.equal([
             BigNumber.from(0)
@@ -163,36 +239,37 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+
+        const startTime = currentTimestamp + 100;
+        const endTime = startTime + TIME_INCREMENT + 100;
+
+        await auction.newCustomAuction(
             nft.address,
             1,
-            currentTimestamp + 100,
-            currentTimestamp + 1300,
+            startTime,
+            endTime,
             units(1)
         );
 
-        await timeTravel(100);
+        await setNextTimestamp(startTime + 99);
 
         await auction.bid(0, { value: units(1) });
 
-        expect((await auction.auctions(0)).endTime).to.equal(
-            currentTimestamp + 1300
-        );
+        expect((await auction.auctions(0)).endTime).to.equal(endTime);
 
-        await timeTravel(600);
+        await setNextTimestamp(startTime + 101);
 
         await auction.connect(user).bid(0, { value: units(2) });
 
-        expect((await auction.auctions(0)).endTime).to.equal(
-            currentTimestamp + 1303
-        );
+        expect((await auction.auctions(0)).endTime).to.equal(endTime + 1);
 
-        await timeTravel(500);
+        const nextTimestamp = startTime + (endTime - (startTime + 100)) / 2;
+        await setNextTimestamp(nextTimestamp);
 
         await auction.bid(0, { value: units(2) });
 
         expect((await auction.auctions(0)).endTime).to.equal(
-            currentTimestamp + 1804
+            nextTimestamp + TIME_INCREMENT
         );
     });
 
@@ -206,14 +283,14 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
             currentTimestamp + 1000,
             units(1)
         );
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             2,
             currentTimestamp + 100,
@@ -251,14 +328,14 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
             currentTimestamp + 1000,
             units(1)
         );
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             2,
             currentTimestamp + 100,
@@ -273,13 +350,13 @@ describe("JPEGAuction", () => {
 
         await expect(
             auction.connect(user).withdrawBids([0, 1])
-        ).to.be.revertedWith("HIGHEST_BID_OWNER");
+        ).to.be.revertedWith("Unauthorized");
 
         await auction.bid(0, { value: units(2) });
 
         await expect(
             auction.connect(user).withdrawBids([0, 1])
-        ).to.be.revertedWith("HIGHEST_BID_OWNER");
+        ).to.be.revertedWith("Unauthorized");
 
         await auction.bid(1, { value: units(2) });
 
@@ -293,7 +370,7 @@ describe("JPEGAuction", () => {
 
         await expect(
             auction.connect(user).withdrawBids([0, 1])
-        ).to.be.revertedWith("NO_BID");
+        ).to.be.revertedWith("Unauthorized");
 
         expect(await ethers.provider.getBalance(auction.address)).to.equal(
             units(4)
@@ -310,7 +387,7 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
@@ -322,9 +399,9 @@ describe("JPEGAuction", () => {
 
         await auction.connect(user).bid(0, { value: units(1) });
 
-        await expect(auction.claimNFT(0)).to.be.revertedWith("NOT_WINNER");
+        await expect(auction.claimNFT(0)).to.be.revertedWith("Unauthorized");
         await expect(auction.connect(user).claimNFT(0)).to.be.revertedWith(
-            "NOT_ENDED"
+            "Unauthorized"
         );
 
         await timeTravel(1000);
@@ -334,7 +411,7 @@ describe("JPEGAuction", () => {
         expect(await nft.ownerOf(1)).to.equal(user.address);
 
         await expect(auction.connect(user).claimNFT(0)).to.be.revertedWith(
-            "ALREADY_CLAIMED"
+            "Unauthorized"
         );
     });
 
@@ -348,7 +425,7 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
@@ -360,12 +437,12 @@ describe("JPEGAuction", () => {
 
         await auction.connect(user).bid(0, { value: units(1) });
 
-        await expect(auction.withdrawETH(0)).to.be.revertedWith("NOT_ENDED");
+        await expect(auction.withdrawETH(0)).to.be.revertedWith("Unauthorized");
 
         await timeTravel(1000);
 
         await expect(auction.withdrawUnsoldNFT(0)).to.be.revertedWith(
-            "NFT_SOLD"
+            "Unauthorized"
         );
 
         await auction.withdrawETH(0);
@@ -373,9 +450,7 @@ describe("JPEGAuction", () => {
             units(0)
         );
 
-        await expect(auction.withdrawETH(0)).to.be.revertedWith(
-            "ALREADY_CLAIMED"
-        );
+        await expect(auction.withdrawETH(0)).to.be.revertedWith("Unauthorized");
     });
 
     it("should allow the owner to withdraw an unsold NFT", async () => {
@@ -388,7 +463,7 @@ describe("JPEGAuction", () => {
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
-        await auction.newAuction(
+        await auction.newCustomAuction(
             nft.address,
             1,
             currentTimestamp + 100,
@@ -397,12 +472,12 @@ describe("JPEGAuction", () => {
         );
 
         await expect(auction.withdrawUnsoldNFT(0)).to.be.revertedWith(
-            "NOT_ENDED"
+            "Unauthorized"
         );
 
         await timeTravel(1000);
 
-        await expect(auction.withdrawETH(0)).to.be.revertedWith("NFT_UNSOLD");
+        await expect(auction.withdrawETH(0)).to.be.revertedWith("Unauthorized");
 
         await auction.withdrawUnsoldNFT(0);
         expect(await ethers.provider.getBalance(auction.address)).to.equal(
@@ -410,7 +485,56 @@ describe("JPEGAuction", () => {
         );
 
         await expect(auction.withdrawUnsoldNFT(0)).to.be.revertedWith(
-            "ALREADY_CLAIMED"
+            "Unauthorized"
+        );
+    });
+
+    it("should allow the admin to cancel an auction with no bids", async () => {
+        await expect(
+            auction.connect(user).cancelAuction(0, ZERO_ADDRESS)
+        ).to.be.revertedWith("AccessControl");
+        await expect(auction.cancelAuction(0, ZERO_ADDRESS)).to.be.revertedWith(
+            "ZeroAddress"
+        );
+        await expect(auction.cancelAuction(0, user.address)).to.be.revertedWith(
+            "InvalidAuction(0)"
+        );
+
+        const ERC721 = await ethers.getContractFactory("TestERC721");
+        const nft = await ERC721.deploy();
+        await nft.mint(owner.address, 1);
+        await nft.mint(owner.address, 2);
+
+        await nft.setApprovalForAll(auction.address, true);
+
+        const currentTimestamp = (await ethers.provider.getBlock("latest"))
+            .timestamp;
+        await auction.newCustomAuction(
+            nft.address,
+            1,
+            currentTimestamp + 100,
+            currentTimestamp + 1000,
+            units(1)
+        );
+
+        await auction.cancelAuction(0, user.address);
+
+        expect(await nft.ownerOf(1)).to.equal(user.address);
+
+        await auction.newCustomAuction(
+            nft.address,
+            2,
+            currentTimestamp + 100,
+            currentTimestamp + 1000,
+            units(1)
+        );
+
+        await timeTravel(100);
+
+        await auction.bid(1, { value: units(1) });
+
+        await expect(auction.cancelAuction(1, user.address)).to.be.revertedWith(
+            "Unauthorized"
         );
     });
 });
