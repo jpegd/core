@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import {
     PETH,
@@ -12,10 +11,6 @@ import {
     MockCurvePool
 } from "../types";
 import { units, ZERO_ADDRESS } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("StrategyPETHConvex", () => {
     let owner: SignerWithAddress, user: SignerWithAddress;

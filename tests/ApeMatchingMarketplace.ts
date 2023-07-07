@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { BigNumber, BigNumberish } from "ethers";
 import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
@@ -12,15 +11,12 @@ import {
 } from "../types";
 import { units } from "./utils";
 
-const { expect } = chai;
-
 const STRATEGY_ROLE = ethers.utils.solidityKeccak256(
     ["string"],
     ["STRATEGY_ROLE"]
 );
 
 const MINTER_ROLE = ethers.utils.solidityKeccak256(["string"], ["MINTER_ROLE"]);
-chai.use(solidity);
 
 const abiCoder = new AbiCoder();
 
@@ -218,7 +214,7 @@ describe("ApeMatchingMarketplace", () => {
 
         await expect(
             depositMain(strategy, user.address, 0, 100, units(10), 0, 0, 0, 0)
-        ).to.be.revertedWith("InvalidRewardShare()");
+        ).to.be.revertedWithCustomError(marketplace, "InvalidRewardShare");
 
         await expect(
             depositMain(
@@ -232,7 +228,7 @@ describe("ApeMatchingMarketplace", () => {
                 0,
                 0
             )
-        ).to.be.revertedWith("InvalidRewardShare()");
+        ).to.be.revertedWithCustomError(marketplace, "InvalidRewardShare");
 
         await depositMain(
             strategy,
@@ -369,13 +365,13 @@ describe("ApeMatchingMarketplace", () => {
             1_500
         );
 
-        await expect(depositApe(user, 0, units(0.5))).to.be.revertedWith(
-            "InvalidAmount()"
-        );
+        await expect(
+            depositApe(user, 0, units(0.5))
+        ).to.be.revertedWithCustomError(marketplace, "InvalidAmount");
 
-        await expect(depositApe(user, 0, units(11_000))).to.be.revertedWith(
-            "InvalidAmount()"
-        );
+        await expect(
+            depositApe(user, 0, units(11_000))
+        ).to.be.revertedWithCustomError(marketplace, "InvalidAmount");
 
         await depositApe(user, 0, units(10));
         expect(await ape.balanceOf(user.address)).to.equal(units(10));
@@ -408,17 +404,17 @@ describe("ApeMatchingMarketplace", () => {
             1_500
         );
 
-        await expect(withdrawApe(user, 0, units(0.5))).to.be.revertedWith(
-            "InvalidAmount()"
-        );
+        await expect(
+            withdrawApe(user, 0, units(0.5))
+        ).to.be.revertedWithCustomError(marketplace, "InvalidAmount");
 
-        await expect(withdrawApe(user, 0, units(20))).to.be.revertedWith(
-            "InvalidAmount()"
-        );
+        await expect(
+            withdrawApe(user, 0, units(20))
+        ).to.be.revertedWithCustomError(marketplace, "InvalidAmount");
 
-        await expect(withdrawApe(user, 0, units(9.5))).to.be.revertedWith(
-            "InvalidAmount()"
-        );
+        await expect(
+            withdrawApe(user, 0, units(9.5))
+        ).to.be.revertedWithCustomError(marketplace, "InvalidAmount");
 
         await withdrawApe(user, 0, units(10));
         expect(await ape.balanceOf(user.address)).to.equal(units(20));
@@ -462,7 +458,7 @@ describe("ApeMatchingMarketplace", () => {
         await bakc.mint(marketplace.address, 200);
         await expect(
             depositBAKC(strategy, owner.address, 0, 200, units(10))
-        ).to.be.revertedWith("InvalidOffer(0)");
+        ).to.be.revertedWithCustomError(marketplace, "InvalidOffer");
 
         await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
@@ -506,7 +502,10 @@ describe("ApeMatchingMarketplace", () => {
         await bakc.mint(marketplace.address, 200);
         await depositBAKC(strategy, owner.address, 1, 200, units(10));
 
-        await expect(claimRewards(user, 1)).to.be.revertedWith("NoRewards()");
+        await expect(claimRewards(user, 1)).to.be.revertedWithCustomError(
+            marketplace,
+            "NoRewards"
+        );
 
         await depositApe(user, 1, units(10));
 
@@ -571,11 +570,11 @@ describe("ApeMatchingMarketplace", () => {
 
         await expect(
             withdrawBAKC(strategy, user.address, 100, user.address)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(marketplace, "Unauthorized");
 
         await expect(
             withdrawBAKC(strategy, user.address, 200, owner.address)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(marketplace, "Unauthorized");
 
         await withdrawBAKC(strategy, owner.address, 200, owner.address);
 
@@ -640,11 +639,11 @@ describe("ApeMatchingMarketplace", () => {
 
         await expect(
             withdrawMain(strategy, user.address, 0, 1, user.address)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(marketplace, "Unauthorized");
 
         await expect(
             withdrawMain(strategy, owner.address, 0, 100, user.address)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(marketplace, "Unauthorized");
 
         await withdrawMain(strategy, user.address, 0, 100, user.address);
 

@@ -1,11 +1,6 @@
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers } from "hardhat";
 import { MockNoContract } from "../types";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("NoContract", () => {
     let mockNoContract: MockNoContract;

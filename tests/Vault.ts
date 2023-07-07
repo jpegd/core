@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { MockRewardPool, MockStrategy, TestERC20, Vault } from "../types";
 import { units, ZERO_ADDRESS } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("Vault", () => {
     let owner: SignerWithAddress, user1: SignerWithAddress;

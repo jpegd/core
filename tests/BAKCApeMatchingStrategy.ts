@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { BigNumberish } from "ethers";
 import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
@@ -13,16 +12,12 @@ import {
 } from "../types";
 import { units } from "./utils";
 
-const { expect } = chai;
-
 const STRATEGY_ROLE = ethers.utils.solidityKeccak256(
     ["string"],
     ["STRATEGY_ROLE"]
 );
 const MINTER_ROLE = ethers.utils.solidityKeccak256(["string"], ["MINTER_ROLE"]);
 const VAULT_ROLE = ethers.utils.solidityKeccak256(["string"], ["VAULT_ROLE"]);
-
-chai.use(solidity);
 
 const abiCoder = new AbiCoder();
 

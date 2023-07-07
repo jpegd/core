@@ -1,12 +1,7 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { FidenzasHelper, TestERC721 } from "../types";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("FidenzasHelper", () => {
     let owner: SignerWithAddress, user: SignerWithAddress;
@@ -30,7 +25,10 @@ describe("FidenzasHelper", () => {
 
     it("should revert when the NFT is out of range", async () => {
         await artblocks.mint(user.address, 0);
-        await expect(helper.ownerOf(0)).to.be.revertedWith("InvalidNFT(0)");
+        await expect(helper.ownerOf(0)).to.be.revertedWithCustomError(
+            helper,
+            "InvalidNFT"
+        );
 
         await artblocks.mint(user.address, 78000990);
         expect(await helper.ownerOf(78000990)).to.equal(user.address);

@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { JPEG, PreJPEG } from "../types";
 import { units, currentTimestamp, days } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const vesting_controller_role =
     "0xc23e4cf9f9c5137c948ad4a95211794895d43271639a97b001bd23951d54c84a";

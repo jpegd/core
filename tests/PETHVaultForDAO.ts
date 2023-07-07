@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { units } from "./utils";
 import { PETHVaultForDAO, PETH } from "../types";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const default_admin_role =
     "0x0000000000000000000000000000000000000000000000000000000000000000";
