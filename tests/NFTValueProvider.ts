@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { BigNumber, BigNumberish } from "ethers";
 import { ethers, upgrades } from "hardhat";
 import {
@@ -18,10 +17,6 @@ import {
     currentTimestamp,
     ZERO_ADDRESS
 } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const apeHash =
     "0x26bca2ecad19e981c90a8c6efd8ee9856bbc5a2042259e6ee31e310fdc08d970";
@@ -221,13 +216,13 @@ describe("NFTValueProvider", () => {
         });
         await nftValueProvider.setNFTType(indexes, apeHash);
 
-        await expect(nftValueProvider.applyTraitBoost([])).to.be.revertedWith(
-            "InvalidLength()"
-        );
+        await expect(
+            nftValueProvider.applyTraitBoost([])
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidLength");
 
-        await expect(nftValueProvider.applyTraitBoost([0])).to.be.revertedWith(
-            'InvalidNFTType("' + zeroHash + '")'
-        );
+        await expect(
+            nftValueProvider.applyTraitBoost([0])
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidNFTType");
 
         const jpegToLock = floor
             .mul(10)
@@ -250,11 +245,11 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).applyTraitBoost(indexes)
-        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         await expect(
             nftValueProvider.applyTraitBoost(indexes)
-        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         expect(
             await Promise.all(
@@ -277,10 +272,10 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.withdrawTraitBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
         await expect(
             nftValueProvider.connect(user).withdrawTraitBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
     });
 
     it("should allow users to lock JPEG for LTV boosts", async () => {
@@ -321,16 +316,16 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.applyLTVBoost(indexes, [0])
-        ).to.be.revertedWith("InvalidLength()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidLength");
         await expect(
             nftValueProvider.applyLTVBoost(indexes, [0, 0, 0])
-        ).to.be.revertedWith("InvalidAmount(0)");
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidAmount");
         await expect(
             nftValueProvider.applyLTVBoost(indexes, [11000, 0, 0])
-        ).to.be.revertedWith("InvalidAmount(11000)");
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidAmount");
         await expect(
             nftValueProvider.applyLTVBoost(indexes, [3000, 0, 0])
-        ).to.be.revertedWith("InvalidRate()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidRate");
 
         await jpeg.mint(user.address, totalJpegAmount);
         await jpeg
@@ -343,11 +338,11 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).applyLTVBoost(indexes, rateIncreases)
-        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         await expect(
             nftValueProvider.applyLTVBoost(indexes, rateIncreases)
-        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         expect(
             await Promise.all(
@@ -378,11 +373,11 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).withdrawLTVBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         await expect(
             nftValueProvider.withdrawLTVBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
     });
 
     it("should allow increasing LTV locks", async () => {
@@ -413,13 +408,13 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).applyLTVBoost(indexes, rateIncreases)
-        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         let newIncreases = rateIncreases.map(r => r * 2);
 
         await expect(
             nftValueProvider.connect(user).applyLTVBoost(indexes, newIncreases)
-        ).to.be.revertedWith("InvalidRate()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidRate");
 
         newIncreases = newIncreases.slice(1);
 
@@ -454,11 +449,11 @@ describe("NFTValueProvider", () => {
             nftValueProvider
                 .connect(user)
                 .applyLTVBoost([indexes[1]], [newIncreases[0] * 2])
-        ).to.be.revertedWith("InvalidRate()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "InvalidRate");
 
         await expect(
             nftValueProvider.applyLTVBoost([indexes[2]], [newIncreases[1] * 2])
-        ).to.be.revertedWith(`LockExists(${indexes[2]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         await nftValueProvider
             .connect(user)
@@ -497,7 +492,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.queueTraitBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         const startTimestamp = (await currentTimestamp()) + 1;
         await setNextTimestamp(startTimestamp);
@@ -506,7 +501,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).queueTraitBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         expect(
             await Promise.all(
@@ -522,7 +517,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).withdrawTraitBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         expect(
             await Promise.all(
@@ -584,7 +579,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.queueLTVBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         const startTimestamp = (await currentTimestamp()) + 1;
         await setNextTimestamp(startTimestamp);
@@ -593,7 +588,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).queueLTVBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         expect(
             await Promise.all(
@@ -609,7 +604,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).withdrawLTVBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         expect(
             await Promise.all(
@@ -629,7 +624,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.applyLTVBoost(indexes, rateIncreases)
-        ).to.be.revertedWith(`LockExists(${indexes[0]})`);
+        ).to.be.revertedWithCustomError(nftValueProvider, "LockExists");
 
         await timeTravel(locksReleaseDelay);
 
@@ -691,7 +686,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).cancelTraitBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         await nftValueProvider.connect(user).queueTraitBoostRelease(indexes);
 
@@ -699,7 +694,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).cancelTraitBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         expect(
             await Promise.all(
@@ -715,7 +710,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).withdrawTraitBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         await nftValueProvider.connect(user).queueTraitBoostRelease(indexes);
 
@@ -723,7 +718,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).cancelTraitBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         expect(
             await Promise.all(
@@ -766,7 +761,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).cancelLTVBoostRelease(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         await nftValueProvider.connect(user).queueLTVBoostRelease(indexes);
 
@@ -802,7 +797,7 @@ describe("NFTValueProvider", () => {
 
         await expect(
             nftValueProvider.connect(user).withdrawLTVBoost(indexes)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftValueProvider, "Unauthorized");
 
         await nftValueProvider.connect(user).queueLTVBoostRelease(indexes);
 

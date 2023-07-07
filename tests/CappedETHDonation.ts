@@ -37,19 +37,19 @@ describe("CappedETHDonation", () => {
     it("should allow the owner to create a new donation event without a whitelist", async () => {
         await expect(
             donation.newDonationEvent(0, 0, 0, 0, 0, 0)
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
         await expect(
             donation.newDonationEvent(units(10), 0, 0, 0, 0, 0)
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
         await expect(
             donation.newDonationEvent(units(10), units(5), 0, 0, 0, 0)
-        ).to.be.revertedWith("InvalidStart()");
+        ).to.be.revertedWithCustomError(donation, "InvalidStart");
 
         const start = (await currentTimestamp()) + 1000;
 
         await expect(
             donation.newDonationEvent(units(10), units(5), 0, start, 0, 0)
-        ).to.be.revertedWith("InvalidDuration()");
+        ).to.be.revertedWithCustomError(donation, "InvalidDuration");
 
         await donation.newDonationEvent(units(10), units(5), 0, start, 0, 1000);
 
@@ -69,7 +69,7 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.newDonationEvent(units(10), units(5), 0, start, 100, 1000)
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
 
         await donation.newDonationEvent(
             units(10),
@@ -104,20 +104,20 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.connect(user1).donate({ value: units(1) })
-        ).to.be.revertedWith("InactiveDonation()");
+        ).to.be.revertedWithCustomError(donation, "InactiveDonation");
 
         await timeTravel(1000);
         await expect(
             donation.connect(user1).donate({ value: units(1) })
-        ).to.be.revertedWith("InactiveDonation()");
+        ).to.be.revertedWithCustomError(donation, "InactiveDonation");
 
         await timeTravel(100);
         await expect(
             donation.connect(user1).donate({ value: 0 })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
         await expect(
             donation.connect(user1).donate({ value: units(10) })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
 
         await donation.connect(user1).donate({ value: units(3) });
 
@@ -130,7 +130,7 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.connect(user1).donate({ value: units(3) })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
 
         await donation.connect(user1).donate({ value: units(2) });
 
@@ -145,7 +145,7 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.connect(user1).donate({ value: units(1) })
-        ).to.be.revertedWith("InactiveDonation()");
+        ).to.be.revertedWithCustomError(donation, "InactiveDonation");
     });
 
     it("should allow whitelisted users to donate", async () => {
@@ -161,21 +161,21 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.connect(user1).donateWhitelist({ value: units(1) })
-        ).to.be.revertedWith("InactiveDonation()");
+        ).to.be.revertedWithCustomError(donation, "InactiveDonation");
         await timeTravel(1000);
 
         await expect(
             donation.donateWhitelist({ value: units(1) })
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(donation, "Unauthorized");
 
         await cards.mint(user1.address, 200);
 
         await expect(
             donation.connect(user1).donateWhitelist({ value: 0 })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
         await expect(
             donation.connect(user1).donateWhitelist({ value: units(2) })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
 
         await donation.connect(user1).donateWhitelist({ value: units(0.5) });
 
@@ -188,7 +188,7 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.connect(user1).donateWhitelist({ value: units(1) })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
 
         await cards.connect(user1).setApprovalForAll(cigStaking.address, true);
         await cigStaking.connect(user1).deposit(200);
@@ -205,11 +205,11 @@ describe("CappedETHDonation", () => {
 
         await expect(
             donation.connect(user1).donateWhitelist({ value: units(1) })
-        ).to.be.revertedWith("InactiveDonation()");
+        ).to.be.revertedWithCustomError(donation, "InactiveDonation");
 
         await expect(
             donation.connect(user1).donate({ value: units(5) })
-        ).to.be.revertedWith("InvalidAmount()");
+        ).to.be.revertedWithCustomError(donation, "InvalidAmount");
 
         await donation.connect(user1).donate({ value: units(4) });
 
@@ -222,8 +222,9 @@ describe("CappedETHDonation", () => {
     });
 
     it("should allow the owner to end the donation event after reaching cap or end timestamp", async () => {
-        await expect(donation.endDonation()).to.be.revertedWith(
-            "InactiveDonation()"
+        await expect(donation.endDonation()).to.be.revertedWithCustomError(
+            donation,
+            "InactiveDonation"
         );
 
         let start = (await currentTimestamp()) + 1000;
@@ -236,8 +237,9 @@ describe("CappedETHDonation", () => {
             1000
         );
 
-        await expect(donation.endDonation()).to.be.revertedWith(
-            "OngoingDonation()"
+        await expect(donation.endDonation()).to.be.revertedWithCustomError(
+            donation,
+            "OngoingDonation"
         );
 
         await timeTravel(1000);
@@ -258,8 +260,9 @@ describe("CappedETHDonation", () => {
             1000
         );
 
-        await expect(donation.endDonation()).to.be.revertedWith(
-            "OngoingDonation()"
+        await expect(donation.endDonation()).to.be.revertedWithCustomError(
+            donation,
+            "OngoingDonation"
         );
 
         await timeTravel(2000);

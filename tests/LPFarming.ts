@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { JPEG, LPFarming, TestERC20 } from "../types";
 import { units, mineBlocks, checkAlmostSame, ZERO_ADDRESS } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("LPFarming", () => {
     let owner: SignerWithAddress,
@@ -55,9 +50,8 @@ describe("LPFarming", () => {
     });
 
     it("only owner can add pools", async () => {
-        await expect(
-            farming.connect(alice).add(10, lpTokens[0].address)
-        ).to.revertedWith("");
+        await expect(farming.connect(alice).add(10, lpTokens[0].address)).to
+            .reverted;
 
         await farming.add(10, lpTokens[0].address);
         await farming.add(20, lpTokens[1].address);
@@ -83,7 +77,7 @@ describe("LPFarming", () => {
         expect(pool.lpToken).to.equal(lpTokens[0].address);
         expect(pool.allocPoint).to.equal(10);
 
-        await expect(farming.connect(alice).set(0, 20)).to.revertedWith("");
+        await expect(farming.connect(alice).set(0, 20)).to.reverted;
         await farming.set(0, 20);
 
         pool = await farming.poolInfo(0);

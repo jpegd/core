@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import {
     DAOStrategyConvex,
@@ -12,10 +11,6 @@ import {
     MockCurvePool
 } from "../types";
 import { units } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const strategist_role =
     "0x17a8e30262c1f919c33056d877a3c22b95c2f5e4dac44683c1c2323cd79fbdb0";

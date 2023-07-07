@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { BigNumber } from "ethers";
 import { ethers, upgrades } from "hardhat";
 import { JPEGAuction } from "../types";
@@ -11,10 +10,6 @@ import {
     currentTimestamp,
     setNextTimestamp
 } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const AUCTION_DURATION = 12 * 60 * 60;
 const TIME_INCREMENT = 600;

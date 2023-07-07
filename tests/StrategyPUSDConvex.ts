@@ -1,6 +1,5 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import {
     FungibleAssetVaultForDAO,
@@ -15,10 +14,6 @@ import {
     Mock3CRVZap
 } from "../types";
 import { units, ZERO_ADDRESS } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("StrategyPUSDConvex", () => {
     let owner: SignerWithAddress, user: SignerWithAddress;

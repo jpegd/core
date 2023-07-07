@@ -1,14 +1,12 @@
 import dotenv from "dotenv";
+import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomiclabs/hardhat-ethers";
-import "@nomiclabs/hardhat-web3"; //For openzeppelin
-import "@nomiclabs/hardhat-waffle";
 import "@nomiclabs/hardhat-etherscan";
-import "hardhat-gas-reporter";
-import "hardhat-abi-exporter";
-import "solidity-coverage";
 import "@typechain/hardhat";
 import "@openzeppelin/hardhat-upgrades";
-import "hardhat-contract-sizer";
+import "hardhat-gas-reporter";
+import "solidity-coverage";
+import "hardhat-abi-exporter";
 
 dotenv.config();
 

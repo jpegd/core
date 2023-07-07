@@ -1,12 +1,7 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers } from "hardhat";
 import { JPEGCardsCigStaking, TestERC721 } from "../types";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("JPEGCardsCigStaking", () => {
     let cigStaking: JPEGCardsCigStaking, cards: TestERC721;
