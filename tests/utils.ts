@@ -1,8 +1,6 @@
 import { ethers } from "hardhat";
-import chai from "chai";
+import { expect } from "chai";
 import { BigNumberish } from "@ethersproject/bignumber";
-
-const { expect } = chai;
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 

@@ -1,7 +1,6 @@
 import { BigNumber } from "@ethersproject/bignumber";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 import {
@@ -21,10 +20,6 @@ import {
     checkAlmostSame,
     ZERO_ADDRESS
 } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const default_admin_role =
     "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -177,13 +172,13 @@ describe("DAONFTVault", () => {
     it("should be able to borrow", async () => {
         await expect(
             nftVault.connect(user).borrow(10001, 100)
-        ).to.be.revertedWith("InvalidNFT(10001)");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidNFT");
 
         await erc721.mint(user.address, 1);
 
-        await expect(nftVault.connect(user).borrow(1, 0)).to.be.revertedWith(
-            "InvalidAmount(0)"
-        );
+        await expect(
+            nftVault.connect(user).borrow(1, 0)
+        ).to.be.revertedWithCustomError(nftVault, "InvalidAmount");
 
         await expect(nftVault.connect(user).borrow(1, 100)).to.be.revertedWith(
             "ERC721: transfer caller is not owner nor approved"
@@ -202,7 +197,7 @@ describe("DAONFTVault", () => {
 
         await expect(
             nftVault.connect(user).borrow(index, borrowAmount.mul(2))
-        ).to.be.revertedWith("InvalidAmount(" + borrowAmount.mul(2) + ")");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidAmount");
 
         const stablecoinBalanceBefore = await stablecoin.balanceOf(
             user.address
@@ -224,29 +219,29 @@ describe("DAONFTVault", () => {
     it("should be able to repay", async () => {
         await expect(
             nftVault.connect(user).repay(10001, 100)
-        ).to.be.revertedWith("InvalidNFT(10001)");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidNFT");
         await erc721.mint(user.address, 1);
-        await expect(nftVault.connect(user).repay(1, 100)).to.be.revertedWith(
-            "Unauthorized()"
-        );
+        await expect(
+            nftVault.connect(user).repay(1, 100)
+        ).to.be.revertedWithCustomError(nftVault, "Unauthorized");
 
         const index = 3000;
         await erc721.mint(user.address, index);
         await expect(
             nftVault.connect(user).repay(index, 100)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftVault, "Unauthorized");
 
         await erc721.connect(user).approve(nftVault.address, index);
         await expect(
             nftVault.connect(user).repay(index, 100)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftVault, "Unauthorized");
 
         const borrowAmount = units(1).mul(10);
         await nftVault.connect(user).borrow(index, borrowAmount);
 
-        await expect(nftVault.connect(user).repay(index, 0)).to.be.revertedWith(
-            "InvalidAmount(0)"
-        );
+        await expect(
+            nftVault.connect(user).repay(index, 0)
+        ).to.be.revertedWithCustomError(nftVault, "InvalidAmount");
 
         // pay half
         expect((await nftVault.positions(index)).debtPrincipal).to.be.equal(
@@ -295,11 +290,11 @@ describe("DAONFTVault", () => {
     it("should be able to close position", async () => {
         await expect(
             nftVault.connect(user).closePosition(10001)
-        ).to.be.revertedWith("InvalidNFT(10001)");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidNFT");
         await erc721.mint(user.address, 1);
         await expect(
             nftVault.connect(user).closePosition(1)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(nftVault, "Unauthorized");
 
         const index = 4000;
         await erc721.mint(user.address, index);
@@ -368,7 +363,7 @@ describe("DAONFTVault", () => {
         await flash.shouldSendBack(false);
         await expect(
             nftVault.connect(user).depositInStrategy(indexes, 0, "0x")
-        ).to.be.revertedWith("InvalidStrategy()");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidStrategy");
 
         await flash.shouldSendBack(true);
         await nftVault.connect(user).depositInStrategy(indexes, 0, "0x");
@@ -396,7 +391,7 @@ describe("DAONFTVault", () => {
 
         await expect(
             nftVault.connect(user).withdrawFromStrategy(indexes)
-        ).to.be.revertedWith("InvalidStrategy()");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidStrategy");
 
         await standard.shouldSendBack(true);
         await nftVault.connect(user).withdrawFromStrategy(indexes);
@@ -445,20 +440,20 @@ describe("DAONFTVault", () => {
             nftVault
                 .connect(user)
                 .flashStrategyFromStandardStrategy([], 1, 0, "0x", "0x")
-        ).to.be.revertedWith("InvalidLength()");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidLength");
 
         await expect(
             nftVault
                 .connect(user)
                 .flashStrategyFromStandardStrategy([100], 0, 1, "0x", "0x")
-        ).to.be.revertedWith("InvalidStrategy()");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidStrategy");
 
         await flash.shouldSendBack(false);
         await expect(
             nftVault
                 .connect(user)
                 .flashStrategyFromStandardStrategy([100], 1, 0, "0x", "0x")
-        ).to.be.revertedWith("InvalidStrategy()");
+        ).to.be.revertedWithCustomError(nftVault, "InvalidStrategy");
 
         await flash.shouldSendBack(true);
         await nftVault

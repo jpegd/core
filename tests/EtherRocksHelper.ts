@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { ZERO_ADDRESS } from "./utils";
 import { EtherRock, EtherRocksHelper } from "../types";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("EtherRocksHelper", () => {
     let owner: SignerWithAddress, user: SignerWithAddress;

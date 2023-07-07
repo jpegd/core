@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { JPEGVaultRouter, NFTVault } from "../types";
 import { ZERO_ADDRESS } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 describe("JPEGVaultRouter", () => {
     let owner: SignerWithAddress;
@@ -23,8 +18,9 @@ describe("JPEGVaultRouter", () => {
     });
 
     it("should call doActions in the specified vaults", async () => {
-        await expect(router.batchExecute([])).to.be.revertedWith(
-            "InvalidLength()"
+        await expect(router.batchExecute([])).to.be.revertedWithCustomError(
+            router,
+            "InvalidLength"
         );
 
         const MockVault = await ethers.getContractFactory("MockNFTVault");
@@ -44,14 +40,14 @@ describe("JPEGVaultRouter", () => {
             }
         ];
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'UnknownVault("' + vault1.address + '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "UnknownVault");
         await router.whitelistVault(vault1.address, false);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'UnknownVault("' + vault2.address + '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "UnknownVault");
         await router.whitelistVault(vault2.address, false);
 
         await expect(router.batchExecute(payload))
@@ -89,42 +85,30 @@ describe("JPEGVaultRouter", () => {
             )
         ];
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'UnknownVault("' + vault1.address + '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "UnknownVault");
         await router.whitelistVault(vault1.address, false);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'UnknownVault("' + vault2.address + '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "UnknownVault");
         await router.whitelistVault(vault2.address, true);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'IncompatibleVaults("' +
-                vault1.address +
-                '", "' +
-                vault2.address +
-                '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "IncompatibleVaults");
         await vault2.setStablecoin(ZERO_ADDRESS);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'IncompatibleVaults("' +
-                vault1.address +
-                '", "' +
-                vault2.address +
-                '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "IncompatibleVaults");
         await router.removeVault(vault2.address);
         await router.whitelistVault(vault2.address, false);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'IncompatibleVaults("' +
-                vault1.address +
-                '", "' +
-                vault2.address +
-                '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "IncompatibleVaults");
         await vault2.setNFT(ZERO_ADDRESS);
 
         await vault1.setPosition(
@@ -185,25 +169,17 @@ describe("JPEGVaultRouter", () => {
         await vault1.setNFT(escrow1.address);
         await vault2.setNFT(escrow2.address);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'IncompatibleVaults("' +
-                vault1.address +
-                '", "' +
-                vault2.address +
-                '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "IncompatibleVaults");
         await router.removeVault(vault1.address);
         await router.removeVault(vault2.address);
         await router.whitelistVault(vault1.address, true);
         await router.whitelistVault(vault2.address, true);
 
-        await expect(router.batchExecute(payload)).to.be.revertedWith(
-            'IncompatibleVaults("' +
-                vault1.address +
-                '", "' +
-                vault2.address +
-                '")'
-        );
+        await expect(
+            router.batchExecute(payload)
+        ).to.be.revertedWithCustomError(router, "IncompatibleVaults");
         await escrow2.setNFTAddress(ZERO_ADDRESS);
 
         await expect(router.batchExecute(payload))

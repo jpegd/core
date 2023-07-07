@@ -1,13 +1,8 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { JPEGIndex, JPEGIndexStaking } from "../types";
 import { units } from "./utils";
-
-const { expect } = chai;
-
-chai.use(solidity);
 
 const minter_role =
     "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6";
@@ -38,7 +33,10 @@ describe("JPEGIndexStaking", () => {
     });
 
     it("should allow users to deposit", async () => {
-        await expect(staking.deposit(0)).to.be.revertedWith("InvalidAmount()");
+        await expect(staking.deposit(0)).to.be.revertedWithCustomError(
+            staking,
+            "InvalidAmount"
+        );
 
         const user1DepositAmount = units(100);
         const user2DepositAmount = units(200);
@@ -91,7 +89,10 @@ describe("JPEGIndexStaking", () => {
     });
 
     it("should allow users to withdraw", async () => {
-        await expect(staking.withdraw(0)).to.be.revertedWith("InvalidAmount()");
+        await expect(staking.withdraw(0)).to.be.revertedWithCustomError(
+            staking,
+            "InvalidAmount"
+        );
 
         const user1DepositAmount = units(100);
         const user2DepositAmount = units(200);
@@ -133,7 +134,10 @@ describe("JPEGIndexStaking", () => {
     });
 
     it("should allow users to claim rewards", async () => {
-        await expect(staking.claim()).to.be.revertedWith("InvalidAmount()");
+        await expect(staking.claim()).to.be.revertedWithCustomError(
+            staking,
+            "InvalidAmount"
+        );
 
         const user1DepositAmount = units(100);
 
@@ -144,9 +148,9 @@ describe("JPEGIndexStaking", () => {
 
         await staking.connect(user1).deposit(user1DepositAmount);
 
-        await expect(staking.connect(user1).claim()).to.be.revertedWith(
-            "NoRewards()"
-        );
+        await expect(
+            staking.connect(user1).claim()
+        ).to.be.revertedWithCustomError(staking, "NoRewards");
 
         await staking.notifyReward({ value: units(10) });
         const balanceBefore = await ethers.provider.getBalance(user1.address);

@@ -1,7 +1,6 @@
 import { BigNumber } from "@ethersproject/bignumber";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import chai from "chai";
-import { solidity } from "ethereum-waffle";
+import { expect } from "chai";
 import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 import {
@@ -13,16 +12,12 @@ import {
 } from "../types";
 import { units } from "./utils";
 
-const { expect } = chai;
-
 const VAULT_ROLE =
     "0x31e0210044b4f6757ce6aa31f9c6e8d4896d24a755014887391a926c5224d959";
 const BAKC_STRATEGY_ROLE =
     "0x6a1f594db90e5efe37169e9519b7ed208b645cacac4f1018dd1ce6b5cd10bcb1";
 const MINTER_ROLE =
     "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6";
-
-chai.use(solidity);
 
 describe("BAKCApeStakingStrategy", () => {
     let owner: SignerWithAddress;
@@ -251,9 +246,9 @@ describe("BAKCApeStakingStrategy", () => {
         await ape.mint(owner.address, secondAmount);
         await ape.approve(bakcStrategy.address, secondAmount);
 
-        await expect(bakcStrategy.depositTokens(newAmounts)).to.be.revertedWith(
-            "Unauthorized()"
-        );
+        await expect(
+            bakcStrategy.depositTokens(newAmounts)
+        ).to.be.revertedWithCustomError(baycStrategy, "Unauthorized");
         await expect(
             bakcStrategy
                 .connect(user)
@@ -342,7 +337,7 @@ describe("BAKCApeStakingStrategy", () => {
 
         await expect(
             bakcStrategy.withdrawTokens(toWithdraw, user.address)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(baycStrategy, "Unauthorized");
 
         await bakcStrategy
             .connect(user)
@@ -421,7 +416,7 @@ describe("BAKCApeStakingStrategy", () => {
 
         await expect(
             bakcStrategy.claimRewards(toClaim, user.address)
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(baycStrategy, "Unauthorized");
 
         await apeStaking.setPendingRewards(3, depositAddress, 0, units(1));
         await apeStaking.setPendingRewards(3, depositAddress, 1, units(1));
@@ -483,7 +478,7 @@ describe("BAKCApeStakingStrategy", () => {
                 owner.address,
                 toWithdraw.tokenId
             )
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(baycStrategy, "Unauthorized");
         await bakcStrategy.withdraw(
             user.address,
             owner.address,
@@ -642,7 +637,7 @@ describe("BAKCApeStakingStrategy", () => {
                 [legacy[0].tokenId, legacy[1].tokenId],
                 user.address
             )
-        ).to.be.revertedWith("Unauthorized()");
+        ).to.be.revertedWithCustomError(baycStrategy, "Unauthorized");
         await expect(
             bakcStrategy
                 .connect(user)
@@ -650,7 +645,7 @@ describe("BAKCApeStakingStrategy", () => {
                     [nftAmounts[0].tokenId, nftAmounts[1].tokenId],
                     user.address
                 )
-        ).to.be.revertedWith("NotDirectDeposit(" + nftAmounts[0].tokenId + ")");
+        ).to.be.revertedWithCustomError(bakcStrategy, "NotDirectDeposit");
         await bakcStrategy
             .connect(user)
             .withdrawNFTs([legacy[0].tokenId, legacy[1].tokenId], user.address);
