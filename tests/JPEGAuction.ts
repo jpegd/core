@@ -35,16 +35,14 @@ describe("JPEGAuction", () => {
     });
 
     it("should allow whitelisted addresses to create a new fixed time auction", async () => {
-        await expect(auction.newAuction(ZERO_ADDRESS, 0, 0)).to.be.revertedWith(
-            "AccessControl"
-        );
+        await expect(auction.newAuction(ZERO_ADDRESS, 0, 0)).to.be.reverted;
         await auction.grantRole(
             ethers.utils.solidityKeccak256(["string"], ["WHITELISTED_ROLE"]),
             owner.address
         );
-        await expect(auction.newAuction(ZERO_ADDRESS, 0, 0)).to.be.revertedWith(
-            "ZeroAddress"
-        );
+        await expect(
+            auction.newAuction(ZERO_ADDRESS, 0, 0)
+        ).to.be.revertedWithCustomError(auction, "ZeroAddress");
 
         const ERC721 = await ethers.getContractFactory("TestERC721");
         const nft = await ERC721.deploy();
@@ -52,9 +50,9 @@ describe("JPEGAuction", () => {
 
         await nft.setApprovalForAll(auction.address, true);
 
-        await expect(auction.newAuction(nft.address, 1, 0)).to.be.revertedWith(
-            "InvalidAmount"
-        );
+        await expect(
+            auction.newAuction(nft.address, 1, 0)
+        ).to.be.revertedWithCustomError(auction, "InvalidAmount");
 
         const nextTimestamp = (await currentTimestamp()) + 1;
         await setNextTimestamp(nextTimestamp);
@@ -82,7 +80,7 @@ describe("JPEGAuction", () => {
     it("should allow the admin to create a new custom auction", async () => {
         await expect(
             auction.newCustomAuction(ZERO_ADDRESS, 0, 0, 0, 0)
-        ).to.be.revertedWith("ZeroAddress");
+        ).to.be.revertedWithCustomError(auction, "ZeroAddress");
 
         const ERC721 = await ethers.getContractFactory("TestERC721");
         const nft = await ERC721.deploy();
@@ -92,7 +90,7 @@ describe("JPEGAuction", () => {
 
         await expect(
             auction.newCustomAuction(nft.address, 1, 0, 0, 0)
-        ).to.be.revertedWith("InvalidAmount");
+        ).to.be.revertedWithCustomError(auction, "InvalidAmount");
 
         const currentTimestamp = (await ethers.provider.getBlock("latest"))
             .timestamp;
@@ -104,7 +102,7 @@ describe("JPEGAuction", () => {
                 0,
                 0
             )
-        ).to.be.revertedWith("InvalidAmount");
+        ).to.be.revertedWithCustomError(auction, "InvalidAmount");
         await expect(
             auction.newCustomAuction(
                 nft.address,
@@ -113,7 +111,7 @@ describe("JPEGAuction", () => {
                 currentTimestamp + 1000,
                 0
             )
-        ).to.be.revertedWith("InvalidAmount");
+        ).to.be.revertedWithCustomError(auction, "InvalidAmount");
 
         await auction.newCustomAuction(
             nft.address,
@@ -138,9 +136,9 @@ describe("JPEGAuction", () => {
         const initialBid = units(1);
         let minBid = initialBid;
 
-        await expect(auction.connect(user).bid(0)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.connect(user).bid(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         const ERC721 = await ethers.getContractFactory("TestERC721");
         const nft = await ERC721.deploy();
@@ -158,15 +156,15 @@ describe("JPEGAuction", () => {
             minBid
         );
 
-        await expect(auction.connect(user).bid(0)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.connect(user).bid(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         await timeTravel(100);
 
         await expect(
             auction.connect(user).bid(0, { value: minBid.sub(1) })
-        ).to.be.revertedWith("InvalidBid");
+        ).to.be.revertedWithCustomError(auction, "InvalidBid");
 
         await auction.connect(user).bid(0, { value: minBid });
 
@@ -188,7 +186,7 @@ describe("JPEGAuction", () => {
             auction.bid(0, {
                 value: minBid.sub(1)
             })
-        ).to.be.revertedWith("InvalidBid");
+        ).to.be.revertedWithCustomError(auction, "InvalidBid");
 
         await auction.bid(0, { value: minBid });
         expect(await auction.getActiveBids(owner.address)).to.deep.equal([
@@ -209,7 +207,7 @@ describe("JPEGAuction", () => {
             auction
                 .connect(user)
                 .bid(0, { value: minBid.sub(initialBid).sub(1) })
-        ).to.be.revertedWith("InvalidBid");
+        ).to.be.revertedWithCustomError(auction, "InvalidBid");
         await auction.connect(user).bid(0, { value: minBid.sub(initialBid) });
 
         expect((await auction.auctions(0)).highestBidOwner).to.equal(
@@ -345,13 +343,13 @@ describe("JPEGAuction", () => {
 
         await expect(
             auction.connect(user).withdrawBids([0, 1])
-        ).to.be.revertedWith("Unauthorized");
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         await auction.bid(0, { value: units(2) });
 
         await expect(
             auction.connect(user).withdrawBids([0, 1])
-        ).to.be.revertedWith("Unauthorized");
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         await auction.bid(1, { value: units(2) });
 
@@ -365,7 +363,7 @@ describe("JPEGAuction", () => {
 
         await expect(
             auction.connect(user).withdrawBids([0, 1])
-        ).to.be.revertedWith("Unauthorized");
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         expect(await ethers.provider.getBalance(auction.address)).to.equal(
             units(4)
@@ -394,10 +392,13 @@ describe("JPEGAuction", () => {
 
         await auction.connect(user).bid(0, { value: units(1) });
 
-        await expect(auction.claimNFT(0)).to.be.revertedWith("Unauthorized");
-        await expect(auction.connect(user).claimNFT(0)).to.be.revertedWith(
+        await expect(auction.claimNFT(0)).to.be.revertedWithCustomError(
+            auction,
             "Unauthorized"
         );
+        await expect(
+            auction.connect(user).claimNFT(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         await timeTravel(1000);
 
@@ -405,9 +406,9 @@ describe("JPEGAuction", () => {
 
         expect(await nft.ownerOf(1)).to.equal(user.address);
 
-        await expect(auction.connect(user).claimNFT(0)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.connect(user).claimNFT(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
     });
 
     it("should allow the owner to withdraw the eth", async () => {
@@ -432,20 +433,26 @@ describe("JPEGAuction", () => {
 
         await auction.connect(user).bid(0, { value: units(1) });
 
-        await expect(auction.withdrawETH(0)).to.be.revertedWith("Unauthorized");
+        await expect(auction.withdrawETH(0)).to.be.revertedWithCustomError(
+            auction,
+            "Unauthorized"
+        );
 
         await timeTravel(1000);
 
-        await expect(auction.withdrawUnsoldNFT(0)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.withdrawUnsoldNFT(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         await auction.withdrawETH(0);
         expect(await ethers.provider.getBalance(auction.address)).to.equal(
             units(0)
         );
 
-        await expect(auction.withdrawETH(0)).to.be.revertedWith("Unauthorized");
+        await expect(auction.withdrawETH(0)).to.be.revertedWithCustomError(
+            auction,
+            "Unauthorized"
+        );
     });
 
     it("should allow the owner to withdraw an unsold NFT", async () => {
@@ -466,34 +473,36 @@ describe("JPEGAuction", () => {
             units(1)
         );
 
-        await expect(auction.withdrawUnsoldNFT(0)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.withdrawUnsoldNFT(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
 
         await timeTravel(1000);
 
-        await expect(auction.withdrawETH(0)).to.be.revertedWith("Unauthorized");
+        await expect(auction.withdrawETH(0)).to.be.revertedWithCustomError(
+            auction,
+            "Unauthorized"
+        );
 
         await auction.withdrawUnsoldNFT(0);
         expect(await ethers.provider.getBalance(auction.address)).to.equal(
             units(0)
         );
 
-        await expect(auction.withdrawUnsoldNFT(0)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.withdrawUnsoldNFT(0)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
     });
 
     it("should allow the admin to cancel an auction with no bids", async () => {
+        await expect(auction.connect(user).cancelAuction(0, ZERO_ADDRESS)).to.be
+            .reverted;
         await expect(
-            auction.connect(user).cancelAuction(0, ZERO_ADDRESS)
-        ).to.be.revertedWith("AccessControl");
-        await expect(auction.cancelAuction(0, ZERO_ADDRESS)).to.be.revertedWith(
-            "ZeroAddress"
-        );
-        await expect(auction.cancelAuction(0, user.address)).to.be.revertedWith(
-            "InvalidAuction(0)"
-        );
+            auction.cancelAuction(0, ZERO_ADDRESS)
+        ).to.be.revertedWithCustomError(auction, "ZeroAddress");
+        await expect(
+            auction.cancelAuction(0, user.address)
+        ).to.be.revertedWithCustomError(auction, "InvalidAuction");
 
         const ERC721 = await ethers.getContractFactory("TestERC721");
         const nft = await ERC721.deploy();
@@ -528,8 +537,8 @@ describe("JPEGAuction", () => {
 
         await auction.bid(1, { value: units(1) });
 
-        await expect(auction.cancelAuction(1, user.address)).to.be.revertedWith(
-            "Unauthorized"
-        );
+        await expect(
+            auction.cancelAuction(1, user.address)
+        ).to.be.revertedWithCustomError(auction, "Unauthorized");
     });
 });
