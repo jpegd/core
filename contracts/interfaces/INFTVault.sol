@@ -62,6 +62,15 @@ interface INFTVault {
 
     function positions(uint256 _idx) external view returns (Position memory);
 
+    function getDebtInterest(uint256 _nftIndex) external view returns (uint256);
+
+    function liquidate(uint256 _nftIndex, address _recipient) external;
+
+    function claimExpiredInsuranceNFT(
+        uint256 _nftIndex,
+        address _recipient
+    ) external;
+
     function forceClosePosition(
         address _account,
         uint256 _nftIndex,
