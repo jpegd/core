@@ -11,6 +11,7 @@
     "coverage": "rm -r ./cache & hardhat coverage --network hardhat"
   },
   "devDependencies": {
+    "@defi-wonderland/smock": "^2.3.5",
     "@nomicfoundation/hardhat-chai-matchers": "1",
     "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
     "@nomiclabs/hardhat-ethers": "^2.2.3",
