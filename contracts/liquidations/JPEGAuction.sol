@@ -105,6 +105,14 @@ contract JPEGAuction is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         setMinimumIncrementRate(_incrementRate);
     }
 
+    function finalizeUpgrade(address _admin) external {
+        bytes32 _role = keccak256("UPGRADED");
+        if (hasRole(_role, address(this))) revert();
+
+        _grantRole(_role, address(this));
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+    }
+
     /// @notice Allows whitelisted addresses to create a new auction in the next slot.
     /// @param _nft The address of the NFT to sell
     /// @param _idx The index of the NFT to sell

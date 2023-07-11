@@ -541,4 +541,14 @@ describe("JPEGAuction", () => {
             auction.cancelAuction(1, user.address)
         ).to.be.revertedWithCustomError(auction, "Unauthorized");
     });
+
+    it("should allow calling finalizeUpgrade once", async () => {
+        await auction.finalizeUpgrade(user.address);
+        await expect(
+            auction.finalizeUpgrade(user.address)
+        ).to.be.revertedWithoutReason();
+
+        expect(await auction.hasRole(ethers.constants.HashZero, user.address))
+            .to.be.true;
+    });
 });
