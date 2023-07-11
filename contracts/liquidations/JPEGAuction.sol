@@ -105,9 +105,14 @@ contract JPEGAuction is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         setMinimumIncrementRate(_incrementRate);
     }
 
-    function finalizeUpgrade(address _admin) external {
+    function finalizeUpgrade(
+        address _admin,
+        uint256 _auctionDuration
+    ) external {
         bytes32 _role = keccak256("UPGRADED");
         if (hasRole(_role, address(this))) revert();
+
+        auctionDuration = _auctionDuration;
 
         _grantRole(_role, address(this));
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);

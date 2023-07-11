@@ -543,12 +543,13 @@ describe("JPEGAuction", () => {
     });
 
     it("should allow calling finalizeUpgrade once", async () => {
-        await auction.finalizeUpgrade(user.address);
+        await auction.finalizeUpgrade(user.address, 1);
         await expect(
-            auction.finalizeUpgrade(user.address)
+            auction.finalizeUpgrade(user.address, 1)
         ).to.be.revertedWithoutReason();
 
         expect(await auction.hasRole(ethers.constants.HashZero, user.address))
             .to.be.true;
+        expect(await auction.auctionDuration()).to.equal(1);
     });
 });
