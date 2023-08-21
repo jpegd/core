@@ -46,14 +46,6 @@ contract PETHVaultForDAO is
         stablecoin = _stablecoin;
     }
 
-    function finalizeUpgrade(
-        address _stablecoin
-    ) external onlyRole(WHITELISTED_ROLE) {
-        if (_stablecoin == address(0)) revert();
-
-        stablecoin = IStableCoin(_stablecoin);
-    }
-
     receive() external payable {
         deposit();
     }

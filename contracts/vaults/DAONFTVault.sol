@@ -159,6 +159,14 @@ contract DAONFTVault is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         settings = _settings;
     }
 
+    function finalizeUpgrade(
+        address _stablecoin
+    ) external onlyRole(WHITELISTED_ROLE) {
+        if (_stablecoin == address(0)) revert();
+
+        stablecoin = IStableCoin(_stablecoin);
+    }
+
     /// @notice Returns the number of open positions
     /// @return The number of open positions
     function totalPositions() external view returns (uint256) {
