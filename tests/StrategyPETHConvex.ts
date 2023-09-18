@@ -2,6 +2,7 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import {
+    WETH,
     PETH,
     StrategyPETHConvex,
     Vault,
@@ -20,7 +21,7 @@ describe("StrategyPETHConvex", () => {
     let peth: PETH;
     let rewardPool: MockRewardPool;
 
-    let cvx: TestERC20, crv: TestERC20, weth: TestERC20;
+    let cvx: TestERC20, crv: TestERC20, weth: WETH;
 
     let cvxETH: MockCurvePool, crvETH: MockCurvePool, want: MockCurvePool;
 
@@ -29,9 +30,10 @@ describe("StrategyPETHConvex", () => {
         owner = accounts[0];
         user = accounts[1];
 
-        const TestERC20 = await ethers.getContractFactory("TestERC20");
+        const WETH = await ethers.getContractFactory("WETH");
+        weth = await WETH.deploy();
 
-        weth = await TestERC20.deploy("", "");
+        const TestERC20 = await ethers.getContractFactory("TestERC20");
         cvx = await TestERC20.deploy("", "");
         crv = await TestERC20.deploy("", "");
 
@@ -73,6 +75,7 @@ describe("StrategyPETHConvex", () => {
         );
         strategy = await Strategy.deploy(
             want.address,
+            weth.address,
             cvx.address,
             crv.address,
             cvxETH.address,
@@ -146,7 +149,7 @@ describe("StrategyPETHConvex", () => {
         await expect(strategy.harvest(0)).to.be.reverted;
 
         await peth.mint(want.address, units(500));
-        await weth.mint(want.address, units(500));
+        await weth.deposit({ value: units(500) });
 
         await want.mint(owner.address, units(1000));
         await want.approve(vault.address, units(1000));
@@ -162,9 +165,7 @@ describe("StrategyPETHConvex", () => {
         await owner.sendTransaction({ to: crvETH.address, value: units(2) });
 
         await strategy.harvest(0);
-        expect(await ethers.provider.getBalance(want.address)).to.equal(
-            units(1.6)
-        );
+        expect(await weth.balanceOf(want.address)).to.equal(units(1.6));
         expect(await strategy.depositedAssets()).to.equal(units(1002));
     });
 });

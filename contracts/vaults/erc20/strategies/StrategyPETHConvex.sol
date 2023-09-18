@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../../../utils/RateLib.sol";
 
 import "../../../interfaces/ICurve.sol";
+import "../../../interfaces/IWETH.sol";
 import "../../../interfaces/I3CRVZap.sol";
 import "../../../interfaces/IBooster.sol";
 import "../../../interfaces/IBaseRewardPool.sol";
@@ -35,6 +36,8 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
 
     ICurve public immutable WANT;
 
+    IWETH public immutable WETH;
+
     IERC20 public immutable CVX;
     IERC20 public immutable CRV;
 
@@ -55,6 +58,7 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
 
     constructor(
         address _want,
+        address _weth,
         address _cvx,
         address _crv,
         address _cvxETH,
@@ -67,6 +71,7 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
     ) {
         if (
             _want == address(0) ||
+            _weth == address(0) ||
             _cvx == address(0) ||
             _crv == address(0) ||
             _cvxETH == address(0) ||
@@ -82,6 +87,8 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
 
         WANT = ICurve(_want);
 
+        WETH = IWETH(_weth);
+
         CVX = IERC20(_cvx);
         CRV = IERC20(_crv);
 
@@ -93,6 +100,7 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
         CVX_PETH_PID = _pid;
 
         IERC20(_want).safeApprove(_booster, type(uint256).max);
+        IERC20(_weth).safeApprove(_want, type(uint256).max);
         IERC20(_cvx).safeApprove(_cvxETH, type(uint256).max);
         IERC20(_crv).safeApprove(_crvETH, type(uint256).max);
     }
@@ -211,10 +219,10 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
             }
         }
 
-        WANT.add_liquidity{ value: address(this).balance }(
-            [address(this).balance, 0],
-            _minOutCurve
-        );
+        uint256 _ethAmount = address(this).balance;
+        WETH.deposit{ value: _ethAmount }();
+
+        WANT.add_liquidity([_ethAmount, 0], _minOutCurve);
 
         uint256 _wantBalance = heldAssets();
 

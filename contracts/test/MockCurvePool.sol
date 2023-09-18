@@ -79,25 +79,21 @@ contract MockCurvePool is TestERC20, ICurve {
     function add_liquidity(
         uint256[2] calldata _amounts,
         uint256 _minMintAmount
-    ) external payable override returns (uint256) {
+    ) external override returns (uint256) {
         require(nextMintAmount >= _minMintAmount, "INSUFFICIENT_MINT_AMOUNT");
 
-        if (_amounts[0] > 0) {
-            if (_amounts[0] != msg.value)
-                tokenIndexes[0].transferFrom(
-                    msg.sender,
-                    address(this),
-                    _amounts[0]
-                );
-        }
-        if (_amounts[1] > 0) {
-            if (_amounts[1] != msg.value)
-                tokenIndexes[1].transferFrom(
-                    msg.sender,
-                    address(this),
-                    _amounts[1]
-                );
-        }
+        if (_amounts[0] > 0)
+            tokenIndexes[0].transferFrom(
+                msg.sender,
+                address(this),
+                _amounts[0]
+            );
+        if (_amounts[1] > 0)
+            tokenIndexes[1].transferFrom(
+                msg.sender,
+                address(this),
+                _amounts[1]
+            );
 
         _mint(msg.sender, nextMintAmount);
 

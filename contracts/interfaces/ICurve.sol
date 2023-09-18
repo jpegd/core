@@ -24,5 +24,5 @@ interface ICurve is IERC20 {
     function add_liquidity(
         uint256[2] calldata _amounts,
         uint256 _min_mint_amount
-    ) external payable returns (uint256);
+    ) external returns (uint256);
 }
