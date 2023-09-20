@@ -201,7 +201,7 @@ contract StrategyPETHConvex is AccessControl, IStrategy {
             uint256 _crvBalance = CRV.balanceOf(address(this));
             if (_crvBalance > 0)
                 //minOut is not needed here, we already have it on the Curve deposit
-                CRV_ETH.exchange(1, 0, _crvBalance, 0, true);
+                CRV_ETH.exchange(2, 1, _crvBalance, 0, true);
 
             if (address(this).balance == 0) revert();
         }
