@@ -36,6 +36,7 @@ describe("StrategyPETHConvex", () => {
         const TestERC20 = await ethers.getContractFactory("TestERC20");
         cvx = await TestERC20.deploy("", "");
         crv = await TestERC20.deploy("", "");
+        const crvUSD = await TestERC20.deploy("", "");
 
         const PETH = await ethers.getContractFactory("PETH");
         peth = await PETH.deploy();
@@ -47,8 +48,9 @@ describe("StrategyPETHConvex", () => {
 
         await cvxETH.setTokenIndex(0, weth.address);
         await cvxETH.setTokenIndex(1, cvx.address);
-        await crvETH.setTokenIndex(0, weth.address);
-        await crvETH.setTokenIndex(1, crv.address);
+        await crvETH.setTokenIndex(0, crvUSD.address);
+        await crvETH.setTokenIndex(1, weth.address);
+        await crvETH.setTokenIndex(2, crv.address);
         await want.setTokenIndex(0, weth.address);
         await want.setTokenIndex(1, peth.address);
 
