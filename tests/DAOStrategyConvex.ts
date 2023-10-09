@@ -38,6 +38,7 @@ describe("DAOStrategyConvex", () => {
         cvx = await TestERC20.deploy("", "");
         crv = await TestERC20.deploy("", "");
         const weth = await TestERC20.deploy("", "");
+        const crvUSD = await TestERC20.deploy("", "");
 
         const PETH = await ethers.getContractFactory("PETH");
         const peth = await PETH.deploy();
@@ -49,8 +50,9 @@ describe("DAOStrategyConvex", () => {
 
         await cvxETH.setTokenIndex(0, weth.address);
         await cvxETH.setTokenIndex(1, cvx.address);
-        await crvETH.setTokenIndex(0, weth.address);
-        await crvETH.setTokenIndex(1, crv.address);
+        await crvETH.setTokenIndex(0, crvUSD.address);
+        await crvETH.setTokenIndex(1, weth.address);
+        await crvETH.setTokenIndex(2, crv.address);
         await want.setTokenIndex(0, weth.address);
         await want.setTokenIndex(1, peth.address);
 
@@ -81,30 +83,17 @@ describe("DAOStrategyConvex", () => {
         );
 
         strategy = await Strategy.deploy(
-            {
-                want: want.address,
-                cvx: cvx.address,
-                crv: crv.address
-            },
+            want.address,
+            cvx.address,
+            crv.address,
+            cvxETH.address,
+            crvETH.address,
+            booster.address,
+            rewardPool.address,
+            0,
             owner.address,
-            {
-                lp: cvxETH.address,
-                ethIndex: 0
-            },
-            {
-                lp: crvETH.address,
-                ethIndex: 0
-            },
-            {
-                booster: booster.address,
-                baseRewardPool: rewardPool.address,
-                pid: 0
-            },
             staking.address,
-            {
-                numerator: 20,
-                denominator: 100
-            }
+            { numerator: 25, denominator: 100 }
         );
 
         await strategy.grantRole(strategist_role, owner.address);
@@ -112,7 +101,7 @@ describe("DAOStrategyConvex", () => {
 
     it("should deposit want on convex", async () => {
         await want.mint(strategy.address, units(500));
-        await strategy["deposit()"]();
+        await strategy.deposit();
 
         expect(await strategy.depositedAssets()).to.equal(units(500));
     });
@@ -120,7 +109,7 @@ describe("DAOStrategyConvex", () => {
     it("should allow strategists to withdraw non strategy tokens", async () => {
         await expect(
             strategy["withdraw(address,address)"](owner.address, want.address)
-        ).to.be.revertedWith("want");
+        ).to.be.revertedWithoutReason();
 
         await cvx.mint(strategy.address, units(500));
         await strategy["withdraw(address,address)"](owner.address, cvx.address);
@@ -129,10 +118,9 @@ describe("DAOStrategyConvex", () => {
     });
 
     it("should allow the owner to withdraw want", async () => {
-        await want.mint(owner.address, units(100));
-        await want.approve(strategy.address, units(100));
+        await want.mint(strategy.address, units(100));
 
-        await strategy["deposit(uint256)"](units(100));
+        await strategy.deposit();
         expect(await strategy.depositedAssets()).to.equal(units(100));
 
         const balanceBefore = await want.balanceOf(owner.address);
@@ -143,10 +131,9 @@ describe("DAOStrategyConvex", () => {
     });
 
     it("should allow the owner to call withdrawAll", async () => {
-        await want.mint(owner.address, units(100));
-        await want.approve(strategy.address, units(100));
+        await want.mint(strategy.address, units(100));
 
-        await strategy["deposit(uint256)"](units(100));
+        await strategy.deposit();
         expect(await strategy.depositedAssets()).to.equal(units(100));
 
         const balanceBefore = await want.balanceOf(owner.address);
@@ -161,12 +148,13 @@ describe("DAOStrategyConvex", () => {
         await jpegIndex.approve(staking.address, units(100));
         await staking.deposit(units(100));
 
-        await expect(strategy.harvest(0)).to.be.revertedWith(
-            "INSUFFICIENT_OUT"
+        await expect(strategy.harvest(0)).to.be.revertedWithCustomError(
+            strategy,
+            "InsufficientBalance"
         );
 
         await want.mint(strategy.address, units(1000));
-        await strategy["deposit()"]();
+        await strategy.deposit();
 
         expect(await strategy.depositedAssets()).to.equal(units(1000));
 
@@ -180,8 +168,8 @@ describe("DAOStrategyConvex", () => {
         await strategy.harvest(0);
 
         expect(await ethers.provider.getBalance(staking.address)).to.equal(
-            units(1.6)
+            units(1.5)
         );
-        expect(await staking.pendingReward(owner.address)).to.equal(units(1.6));
+        expect(await staking.pendingReward(owner.address)).to.equal(units(1.5));
     });
 });

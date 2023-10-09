@@ -20,107 +20,81 @@ contract DAOStrategyConvex is AccessControl, IStrategy {
     using SafeERC20 for ICurve;
     using RateLib for RateLib.Rate;
 
+    error ZeroAddress();
+    error InsufficientBalance();
+
     event Harvested(uint256 wantEarned);
 
-    /// @param booster Convex Booster's address
-    /// @param baseRewardPool Convex BaseRewardPool's address
-    /// @param pid The Convex pool id for PETH/ETH LP tokens
-    struct ConvexConfig {
-        IBooster booster;
-        IBaseRewardPool baseRewardPool;
-        uint256 pid;
-    }
-
-    /// @param lp The curve LP token
-    /// @param ethIndex The eth index in the curve LP pool
-    struct CurveConfig {
-        ICurve lp;
-        uint256 ethIndex;
-    }
-
-    struct StrategyTokens {
-        ICurve want;
-        IERC20 cvx;
-        IERC20 crv;
-    }
-
     bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
+    bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
 
-    StrategyTokens public strategyTokens;
+    ICurve public immutable WANT;
+
+    IERC20 public immutable CVX;
+    IERC20 public immutable CRV;
+
+    ICurve public immutable CVX_ETH;
+    ICurve public immutable CRV_ETH;
+
+    IBooster public immutable CVX_BOOSTER;
+    IBaseRewardPool public immutable REWARD_POOL;
+    uint256 public immutable CVX_PETH_PID;
+
+    IJPEGIndexStaking public immutable IJPEG_STAKING;
 
     address public feeRecipient;
 
-    CurveConfig public cvxEth;
-    CurveConfig public crvEth;
-
-    ConvexConfig public convexConfig;
-    /// @notice The JPEG Index staking contract
-    IJPEGIndexStaking jpegIndexStaking;
     /// @notice The performance fee to be sent to the DAO/strategists
     RateLib.Rate public performanceFee;
 
     /// @notice lifetime strategy earnings denominated in `eth` tokens
     uint256 public earned;
 
-    /// @param _strategyTokens tokens relevant to this strategy
-    /// @param _feeAddress The fee recipient address
-    /// @param _cvxEth See {CurveSwapConfig}
-    /// @param _crvEth See {CurveSwapConfig}
-    /// @param _convexConfig See {ConvexConfig} struct
-    /// @param _jpegIndexStaking The JPEG Index staking contract
-    /// @param _performanceFee The rate of ETH to be sent to the DAO/strategists
     constructor(
-        StrategyTokens memory _strategyTokens,
+        address _want,
+        address _cvx,
+        address _crv,
+        address _cvxETH,
+        address _crvETH,
+        address _booster,
+        address _rewardPool,
+        uint256 _pid,
         address _feeAddress,
-        CurveConfig memory _cvxEth,
-        CurveConfig memory _crvEth,
-        ConvexConfig memory _convexConfig,
-        IJPEGIndexStaking _jpegIndexStaking,
+        address _jpegIndexStaking,
         RateLib.Rate memory _performanceFee
     ) {
-        require(address(_strategyTokens.want) != address(0), "INVALID_WANT");
-
-        require(address(_strategyTokens.cvx) != address(0), "INVALID_CVX");
-        require(address(_strategyTokens.crv) != address(0), "INVALID_CRV");
-
-        require(address(_cvxEth.lp) != address(0), "INVALID_CVXETH_LP");
-        require(address(_crvEth.lp) != address(0), "INVALID_CRVETH_LP");
-        require(_cvxEth.ethIndex < 2, "INVALID_ETH_INDEX");
-        require(_crvEth.ethIndex < 2, "INVALID_ETH_INDEX");
-
-        require(
-            address(_convexConfig.booster) != address(0),
-            "INVALID_CONVEX_BOOSTER"
-        );
-        require(
-            address(_convexConfig.baseRewardPool) != address(0),
-            "INVALID_CONVEX_BASE_REWARD_POOL"
-        );
-        require(
-            address(_jpegIndexStaking) != address(0),
-            "INVALID_INDEX_STAKING"
-        );
+        if (
+            _want == address(0) ||
+            _cvx == address(0) ||
+            _crv == address(0) ||
+            _cvxETH == address(0) ||
+            _crvETH == address(0) ||
+            _booster == address(0) ||
+            _feeAddress == address(0) ||
+            _jpegIndexStaking == address(0)
+        ) revert ZeroAddress();
 
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         setFeeRecipient(_feeAddress);
         setPerformanceFee(_performanceFee);
 
-        strategyTokens = _strategyTokens;
+        WANT = ICurve(_want);
 
-        feeRecipient = _feeAddress;
+        CVX = IERC20(_cvx);
+        CRV = IERC20(_crv);
 
-        cvxEth = _cvxEth;
-        crvEth = _crvEth;
+        CVX_ETH = ICurve(_cvxETH);
+        CRV_ETH = ICurve(_crvETH);
 
-        convexConfig = _convexConfig;
-        jpegIndexStaking = _jpegIndexStaking;
+        CVX_BOOSTER = IBooster(_booster);
+        REWARD_POOL = IBaseRewardPool(_rewardPool);
+        CVX_PETH_PID = _pid;
 
-        _strategyTokens.want.safeApprove(
-            address(_convexConfig.booster),
-            type(uint256).max
-        );
-        _strategyTokens.cvx.safeApprove(address(_cvxEth.lp), type(uint256).max);
-        _strategyTokens.crv.safeApprove(address(_crvEth.lp), type(uint256).max);
+        IJPEG_STAKING = IJPEGIndexStaking(_jpegIndexStaking);
+
+        IERC20(_want).safeApprove(address(_booster), type(uint256).max);
+        IERC20(_cvx).safeApprove(_cvxETH, type(uint256).max);
+        IERC20(_crv).safeApprove(_crvETH, type(uint256).max);
     }
 
     receive() external payable {}
@@ -146,12 +120,12 @@ contract DAOStrategyConvex is AccessControl, IStrategy {
 
     /// @return The amount of `want` tokens held by this contract
     function heldAssets() public view returns (uint256) {
-        return strategyTokens.want.balanceOf(address(this));
+        return WANT.balanceOf(address(this));
     }
 
     /// @return The amount of `want` tokens deposited in the Convex pool by this contract
     function depositedAssets() public view returns (uint256) {
-        return convexConfig.baseRewardPool.balanceOf(address(this));
+        return REWARD_POOL.balanceOf(address(this));
     }
 
     /// @return The total amount of `want` tokens this contract manages (held + deposited)
@@ -161,18 +135,7 @@ contract DAOStrategyConvex is AccessControl, IStrategy {
 
     /// @notice Allows the admin to deposit all want tokens held by this contract on convex
     function deposit() public override onlyRole(DEFAULT_ADMIN_ROLE) {
-        ConvexConfig memory convex = convexConfig;
-        convex.booster.depositAll(convex.pid, true);
-    }
-
-    /// @notice Allows the admin to deposit want tokens on convex
-    function deposit(uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        strategyTokens.want.safeTransferFrom(
-            msg.sender,
-            address(this),
-            _amount
-        );
-        deposit();
+        CVX_BOOSTER.depositAll(CVX_PETH_PID, true);
     }
 
     /// @notice Strategist only function that allows to withdraw non-strategy tokens (e.g tokens sent accidentally).
@@ -181,11 +144,12 @@ contract DAOStrategyConvex is AccessControl, IStrategy {
         address _to,
         address _asset
     ) external override onlyRole(STRATEGIST_ROLE) {
-        require(_to != address(0), "INVALID_ADDRESS");
-        require(address(strategyTokens.want) != _asset, "want");
+        if (_to == address(0)) revert ZeroAddress();
 
-        uint256 balance = IERC20(_asset).balanceOf(address(this));
-        IERC20(_asset).safeTransfer(_to, balance);
+        if (_asset == address(WANT)) revert();
+
+        uint256 _balance = IERC20(_asset).balanceOf(address(this));
+        IERC20(_asset).safeTransfer(_to, _balance);
     }
 
     /// @notice Allows the owner to withdraw `want` tokens.
@@ -195,88 +159,67 @@ contract DAOStrategyConvex is AccessControl, IStrategy {
         address _to,
         uint256 _amount
     ) external override onlyRole(DEFAULT_ADMIN_ROLE) {
-        ICurve _want = strategyTokens.want;
-
-        uint256 balance = _want.balanceOf(address(this));
+        uint256 _balance = WANT.balanceOf(address(this));
         //if the contract doesn't have enough want, withdraw from Convex
-        if (balance < _amount) {
+        if (_balance < _amount) {
             unchecked {
-                convexConfig.baseRewardPool.withdrawAndUnwrap(
-                    _amount - balance,
-                    false
-                );
+                REWARD_POOL.withdrawAndUnwrap(_amount - _balance, false);
             }
         }
 
-        _want.safeTransfer(_to, _amount);
+        WANT.safeTransfer(_to, _amount);
     }
 
     /// @notice Allows the owner to withdraw all `want` tokens.
     function withdrawAll() external override onlyRole(DEFAULT_ADMIN_ROLE) {
-        ICurve _want = strategyTokens.want;
+        REWARD_POOL.withdrawAllAndUnwrap(true);
 
-        convexConfig.baseRewardPool.withdrawAllAndUnwrap(true);
-
-        uint256 balance = _want.balanceOf(address(this));
-        _want.safeTransfer(msg.sender, balance);
+        uint256 _balance = WANT.balanceOf(address(this));
+        WANT.safeTransfer(msg.sender, _balance);
     }
 
     /// @notice Allows members of the `STRATEGIST_ROLE` to claim convex rewards, sell them to ETH and distribute them to JPEG Index stakers.
-    /// @param minOutETH The minimum amount of ETH to receive
-    function harvest(uint256 minOutETH) external onlyRole(STRATEGIST_ROLE) {
-        convexConfig.baseRewardPool.getReward(address(this), true);
-        uint256 ethBalance;
+    /// @param _minOutETH The minimum amount of ETH to receive
+    function harvest(uint256 _minOutETH) external onlyRole(STRATEGIST_ROLE) {
+        REWARD_POOL.getReward(address(this), true);
+        uint256 _ethBalance;
+
         //Prevent `Stack too deep` errors
         {
-            uint256 cvxBalance = strategyTokens.cvx.balanceOf(address(this));
-            if (cvxBalance > 0) {
-                CurveConfig memory _cvxEth = cvxEth;
+            uint256 _cvxBalance = CVX.balanceOf(address(this));
+            if (_cvxBalance > 0)
                 //minOut is not needed here, we already have it on the Curve deposit
-                _cvxEth.lp.exchange(
-                    1 - _cvxEth.ethIndex,
-                    _cvxEth.ethIndex,
-                    cvxBalance,
-                    0,
-                    true
-                );
-            }
+                CVX_ETH.exchange(1, 0, _cvxBalance, 0, true);
 
-            uint256 crvBalance = strategyTokens.crv.balanceOf(address(this));
-            if (crvBalance > 0) {
-                CurveConfig memory _crvEth = crvEth;
+            uint256 _crvBalance = CRV.balanceOf(address(this));
+            if (_crvBalance > 0)
                 //minOut is not needed here, we already have it on the Curve deposit
-                _crvEth.lp.exchange(
-                    1 - _crvEth.ethIndex,
-                    _crvEth.ethIndex,
-                    crvBalance,
-                    0,
-                    true
-                );
-            }
+                CRV_ETH.exchange(2, 1, _crvBalance, 0, true);
 
-            ethBalance = address(this).balance;
-            require(ethBalance > minOutETH, "INSUFFICIENT_OUT");
+            _ethBalance = address(this).balance;
+            if (_ethBalance == _minOutETH) revert InsufficientBalance();
         }
 
         //take the performance fee
-        uint256 fee = (ethBalance * performanceFee.numerator) /
+        uint256 _fee = (address(this).balance * performanceFee.numerator) /
             performanceFee.denominator;
 
-        (bool success, bytes memory result) = feeRecipient.call{ value: fee }(
-            ""
-        );
-        if (!success) {
+        (bool _success, bytes memory _result) = feeRecipient.call{
+            value: _fee
+        }("");
+        if (!_success) {
             assembly {
-                revert(add(result, 32), mload(result))
+                revert(add(_result, 32), mload(_result))
             }
         }
+
         unchecked {
-            ethBalance -= fee;
+            _ethBalance -= _fee;
         }
 
-        jpegIndexStaking.notifyReward{ value: ethBalance }();
+        IJPEG_STAKING.notifyReward{ value: _ethBalance }();
 
-        earned += ethBalance;
-        emit Harvested(ethBalance);
+        earned += _ethBalance;
+        emit Harvested(_ethBalance);
     }
 }
