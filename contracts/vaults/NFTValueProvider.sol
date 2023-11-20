@@ -94,6 +94,7 @@ contract NFTValueProvider is
     }
 
     bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
+    bytes32 public constant FLOOR_SETTER_ROLE = keccak256("FLOOR_SETTER_ROLE");
 
     address public constant BURN_ADDRESS =
         0x000000000000000000000000000000000000dEaD;
@@ -211,13 +212,13 @@ contract NFTValueProvider is
         minJPEGToLock = 1 ether;
     }
 
-    function finalizeUpgrade(address _admin) external {
+    function finalizeUpgrade(address _floorSetter) external {
         bytes32 _role = getRoleAdmin(keccak256("UPGRADE"));
-        if (_role != bytes32(0)) revert();
+        if (_role == keccak256("2")) revert();
 
-        _setRoleAdmin(keccak256("UPGRADE"), keccak256("1"));
+        _setRoleAdmin(keccak256("UPGRADE"), keccak256("2"));
 
-        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(FLOOR_SETTER_ROLE, _floorSetter);
     }
 
     /// @param _owner The owner of the NFT at index `_nftIndex` (or the owner of the associated position in the vault)
@@ -474,7 +475,7 @@ contract NFTValueProvider is
     /// @param _newFloor The new floor
     function overrideFloor(
         uint256 _newFloor
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    ) external onlyRole(FLOOR_SETTER_ROLE) {
         if (_newFloor == 0) revert InvalidAmount(_newFloor);
         overriddenFloorValueETH = _newFloor;
         daoFloorOverride = true;

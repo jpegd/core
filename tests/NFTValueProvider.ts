@@ -22,8 +22,8 @@ const apeHash =
     "0x26bca2ecad19e981c90a8c6efd8ee9856bbc5a2042259e6ee31e310fdc08d970";
 const minterRole =
     "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6";
-const zeroHash =
-    "0x0000000000000000000000000000000000000000000000000000000000000000";
+const floorSetterRole =
+    "0x9307bf4986cee6b6163a453d4173b1349f1c9b98f392e532108f1728b4a5e9c1";
 
 const baseCreditLimitRate = [60, 100];
 const baseLiquidationLimitRate = [70, 100];
@@ -973,7 +973,10 @@ describe("NFTValueProvider", () => {
         ).to.deep.equal([bn(0), bn(0)]);
     });
 
-    it("should allow the owner to override floor price", async () => {
+    it("should allow floor setter role to override floor price", async () => {
+        expect(await nftValueProvider.hasRole(floorSetterRole, owner.address))
+            .to.be.false;
+        await nftValueProvider.grantRole(floorSetterRole, owner.address);
         await nftValueProvider.overrideFloor(units(10));
         expect(await nftValueProvider.getFloorETH()).to.equal(units(10));
         expect(await nftValueProvider.getNFTValueETH(0)).to.equal(units(10));
@@ -986,7 +989,7 @@ describe("NFTValueProvider", () => {
         await expect(nftValueProvider.finalizeUpgrade(user.address)).to.be
             .reverted;
 
-        expect(await nftValueProvider.hasRole(zeroHash, user.address)).to.be
-            .true;
+        expect(await nftValueProvider.hasRole(floorSetterRole, user.address)).to
+            .be.true;
     });
 });
