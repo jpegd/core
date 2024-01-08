@@ -5,7 +5,7 @@ import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 import {
     FungibleAssetVaultForDAO,
-    JPEG,
+    NFT,
     MockV3Aggregator,
     NFTVault,
     StableCoin,
@@ -48,14 +48,14 @@ describe("NFTVault", () => {
         user: SignerWithAddress;
     let nftVault: NFTVault,
         usdcVault: FungibleAssetVaultForDAO,
-        jpegOracle: UniswapV2MockOracle,
+        nftTokenOracle: MockV3Aggregator,
         ethOracle: MockV3Aggregator,
         usd_oracle: MockV3Aggregator,
         fallbackOracle: MockV3Aggregator,
         usdc: TestERC20,
         stablecoin: StableCoin,
         erc721: TestERC721,
-        jpeg: JPEG;
+        nft: NFT;
 
     beforeEach(async () => {
         const accounts = await ethers.getSigners();
@@ -84,7 +84,7 @@ describe("NFTVault", () => {
         const MockOracle = await ethers.getContractFactory(
             "UniswapV2MockOracle"
         );
-        jpegOracle = await MockOracle.deploy(1000000000000000);
+        const jpegOracle = await MockOracle.deploy(1000000000000000);
         await jpegOracle.deployed();
 
         const MockAggregator = await ethers.getContractFactory(
@@ -92,6 +92,9 @@ describe("NFTVault", () => {
         );
         ethOracle = await MockAggregator.deploy(8, 3000e8);
         await ethOracle.deployed();
+
+        nftTokenOracle = await MockAggregator.deploy(18, 1000000000000000);
+        await nftTokenOracle.deployed();
 
         const floorOracle = await MockAggregator.deploy(18, units(50));
         await floorOracle.deployed();
@@ -102,12 +105,12 @@ describe("NFTVault", () => {
         usd_oracle = await MockAggregator.deploy(8, 1e8);
         await usd_oracle.deployed();
 
-        const JPEG = await ethers.getContractFactory("JPEG");
+        const NFT = await ethers.getContractFactory("NFT");
 
-        jpeg = await JPEG.deploy(units(1000000000));
-        await jpeg.deployed();
+        nft = await NFT.deploy();
+        await nft.deployed();
 
-        await jpeg.grantRole(minter_role, owner.address);
+        await nft.grantRole(minter_role, owner.address);
 
         const JPEGOraclesAggregator = await ethers.getContractFactory(
             "JPEGOraclesAggregator"
@@ -119,18 +122,22 @@ describe("NFTVault", () => {
         const NFTValueProvider = await ethers.getContractFactory(
             "NFTValueProvider"
         );
+
         const nftValueProvider = await upgrades.deployProxy(NFTValueProvider, [
-            jpeg.address,
+            nft.address,
+            nftTokenOracle.address,
             jpegOraclesAggregator.address,
             cigStaking.address,
-            [32, 100],
-            [33, 100],
-            [7, 100],
-            [10, 100],
-            [8, 100],
-            [10, 100],
-            [80, 100],
-            [81, 100],
+            [
+                [32, 100],
+                [33, 100],
+                [7, 100],
+                [10, 100],
+                [8, 100],
+                [10, 100],
+                [80, 100],
+                [81, 100]
+            ],
             86400
         ]);
 
@@ -1066,8 +1073,8 @@ describe("NFTVault", () => {
         await erc721.mint(user.address, index2);
         await erc721.connect(user).setApprovalForAll(nftVault.address, true);
 
-        await jpeg.mint(user.address, units(36000));
-        await jpeg.connect(user).approve(nftVault.address, units(36000));
+        await nft.mint(user.address, units(36000));
+        await nft.connect(user).approve(nftVault.address, units(36000));
 
         await stablecoin.connect(user).approve(nftVault.address, borrowAmount1);
 
