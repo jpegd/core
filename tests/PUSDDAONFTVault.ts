@@ -5,13 +5,12 @@ import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 import {
     FungibleAssetVaultForDAO,
-    JPEG,
+    JPGD,
     MockV3Aggregator,
     PUSDDAONFTVault,
     StableCoin,
     TestERC20,
-    TestERC721,
-    UniswapV2MockOracle
+    TestERC721
 } from "../types";
 import {
     units,
@@ -40,14 +39,14 @@ describe("PUSDDAONFTVault", () => {
         user: SignerWithAddress;
     let nftVault: PUSDDAONFTVault,
         usdcVault: FungibleAssetVaultForDAO,
-        jpegOracle: UniswapV2MockOracle,
+        jpgdTokenOracle: MockV3Aggregator,
         ethOracle: MockV3Aggregator,
         usd_oracle: MockV3Aggregator,
         fallbackOracle: MockV3Aggregator,
         usdc: TestERC20,
         stablecoin: StableCoin,
         erc721: TestERC721,
-        jpeg: JPEG;
+        jpgd: JPGD;
 
     beforeEach(async () => {
         const accounts = await ethers.getSigners();
@@ -73,17 +72,14 @@ describe("PUSDDAONFTVault", () => {
         stablecoin = await StableCoin.deploy();
         await stablecoin.deployed();
 
-        const MockOracle = await ethers.getContractFactory(
-            "UniswapV2MockOracle"
-        );
-        jpegOracle = await MockOracle.deploy(1000000000000000);
-        await jpegOracle.deployed();
-
         const MockAggregator = await ethers.getContractFactory(
             "MockV3Aggregator"
         );
         ethOracle = await MockAggregator.deploy(8, 3000e8);
         await ethOracle.deployed();
+
+        jpgdTokenOracle = await MockAggregator.deploy(18, 1000000000000000);
+        await jpgdTokenOracle.deployed();
 
         const floorOracle = await MockAggregator.deploy(18, units(50));
         await floorOracle.deployed();
@@ -94,12 +90,18 @@ describe("PUSDDAONFTVault", () => {
         usd_oracle = await MockAggregator.deploy(8, 1e8);
         await usd_oracle.deployed();
 
-        const JPEG = await ethers.getContractFactory("JPEG");
+        const JPGD = await ethers.getContractFactory("JPGD");
 
-        jpeg = await JPEG.deploy(units(1000000000));
-        await jpeg.deployed();
+        jpgd = await JPGD.deploy();
+        await jpgd.deployed();
 
-        await jpeg.grantRole(minter_role, owner.address);
+        await jpgd.grantRole(minter_role, owner.address);
+
+        const MockOracle = await ethers.getContractFactory(
+            "UniswapV2MockOracle"
+        );
+        const jpegOracle = await MockOracle.deploy(1000000000000000);
+        await jpegOracle.deployed();
 
         const JPEGOraclesAggregator = await ethers.getContractFactory(
             "JPEGOraclesAggregator"
@@ -112,17 +114,20 @@ describe("PUSDDAONFTVault", () => {
             "NFTValueProvider"
         );
         const nftValueProvider = await upgrades.deployProxy(NFTValueProvider, [
-            jpeg.address,
+            jpgd.address,
+            jpgdTokenOracle.address,
             jpegOraclesAggregator.address,
             cigStaking.address,
-            [32, 100],
-            [33, 100],
-            [7, 100],
-            [10, 100],
-            [8, 100],
-            [10, 100],
-            [80, 100],
-            [81, 100],
+            [
+                [32, 100],
+                [33, 100],
+                [7, 100],
+                [10, 100],
+                [8, 100],
+                [10, 100],
+                [80, 100],
+                [81, 100]
+            ],
             86400
         ]);
 
@@ -475,8 +480,8 @@ describe("PUSDDAONFTVault", () => {
         await erc721.mint(user.address, index2);
         await erc721.connect(user).setApprovalForAll(nftVault.address, true);
 
-        await jpeg.mint(user.address, units(36000));
-        await jpeg.connect(user).approve(nftVault.address, units(36000));
+        await jpgd.mint(user.address, units(36000));
+        await jpgd.connect(user).approve(nftVault.address, units(36000));
 
         await stablecoin.connect(user).approve(nftVault.address, borrowAmount1);
 

@@ -7,11 +7,16 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 
-contract NFT is Context, AccessControlEnumerable, ERC20Burnable, ERC20Pausable {
+contract JPGD is
+    Context,
+    AccessControlEnumerable,
+    ERC20Burnable,
+    ERC20Pausable
+{
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
-    constructor() ERC20("JPEG\xE2\x80\x99d ETH", "NFT") {
+    constructor() ERC20("JPEG\xE2\x80\x99d", "JPGD") {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
     }
 

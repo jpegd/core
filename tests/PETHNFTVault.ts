@@ -5,13 +5,12 @@ import { AbiCoder } from "ethers/lib/utils";
 import { ethers, upgrades } from "hardhat";
 import {
     FungibleAssetVaultForDAO,
-    JPEG,
     MockV3Aggregator,
     PETH,
     TestERC20,
     TestERC721,
-    UniswapV2MockOracle,
-    PETHNFTVault
+    PETHNFTVault,
+    JPGD
 } from "../types";
 import {
     units,
@@ -48,14 +47,14 @@ describe("PETHNFTVault", () => {
         user: SignerWithAddress;
     let nftVault: PETHNFTVault,
         ethVault: FungibleAssetVaultForDAO,
+        jpgdTokenOracle: MockV3Aggregator,
         ethOracle: MockV3Aggregator,
-        jpegOracle: UniswapV2MockOracle,
         floorOracle: MockV3Aggregator,
         fallbackOracle: MockV3Aggregator,
         weth: TestERC20,
         stablecoin: PETH,
         erc721: TestERC721,
-        jpeg: JPEG;
+        jpgd: JPGD;
 
     beforeEach(async () => {
         const accounts = await ethers.getSigners();
@@ -84,7 +83,7 @@ describe("PETHNFTVault", () => {
         const MockOracle = await ethers.getContractFactory(
             "UniswapV2MockOracle"
         );
-        jpegOracle = await MockOracle.deploy(1000000000000000);
+        const jpegOracle = await MockOracle.deploy(1000000000000000);
         await jpegOracle.deployed();
 
         const MockAggregator = await ethers.getContractFactory(
@@ -93,18 +92,21 @@ describe("PETHNFTVault", () => {
         ethOracle = await MockAggregator.deploy(8, 3000e8);
         await ethOracle.deployed();
 
+        jpgdTokenOracle = await MockAggregator.deploy(18, 1000000000000000);
+        await jpgdTokenOracle.deployed();
+
         floorOracle = await MockAggregator.deploy(18, units(50));
         await floorOracle.deployed();
 
         fallbackOracle = await MockAggregator.deploy(18, units(10));
         await fallbackOracle.deployed();
 
-        const JPEG = await ethers.getContractFactory("JPEG");
+        const JPGD = await ethers.getContractFactory("JPGD");
 
-        jpeg = await JPEG.deploy(units(1000000000));
-        await jpeg.deployed();
+        jpgd = await JPGD.deploy();
+        await jpgd.deployed();
 
-        await jpeg.grantRole(minter_role, owner.address);
+        await jpgd.grantRole(minter_role, owner.address);
 
         const JPEGOraclesAggregator = await ethers.getContractFactory(
             "JPEGOraclesAggregator"
@@ -117,17 +119,20 @@ describe("PETHNFTVault", () => {
             "NFTValueProvider"
         );
         const nftValueProvider = await upgrades.deployProxy(NFTValueProvider, [
-            jpeg.address,
+            jpgd.address,
+            jpgdTokenOracle.address,
             jpegOraclesAggregator.address,
             cigStaking.address,
-            [32, 100],
-            [33, 100],
-            [7, 100],
-            [10, 100],
-            [8, 100],
-            [10, 100],
-            [80, 100],
-            [81, 100],
+            [
+                [32, 100],
+                [33, 100],
+                [7, 100],
+                [10, 100],
+                [8, 100],
+                [10, 100],
+                [80, 100],
+                [81, 100]
+            ],
             86400
         ]);
 
@@ -1012,8 +1017,8 @@ describe("PETHNFTVault", () => {
         await erc721.mint(user.address, index2);
         await erc721.connect(user).setApprovalForAll(nftVault.address, true);
 
-        await jpeg.mint(user.address, units(36000));
-        await jpeg.connect(user).approve(nftVault.address, units(36000));
+        await jpgd.mint(user.address, units(36000));
+        await jpgd.connect(user).approve(nftVault.address, units(36000));
 
         await stablecoin.connect(user).approve(nftVault.address, borrowAmount1);
 
