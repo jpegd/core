@@ -50,6 +50,10 @@ module.exports = {
       url: "https://eth-goerli.alchemyapi.io/v2/" + process.env.ALCHEMY_API_KEY,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
     },
+    arb_sepolia: {
+      url:  "https://arb-sepolia.g.alchemy.com/v2/" + process.env.ALCHEMY_API_KEY,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+    },
     mainnet: {
       url: "https://eth-mainnet.alchemyapi.io/v2/" + process.env.ALCHEMY_API_KEY,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
@@ -79,6 +83,16 @@ module.exports = {
   },
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY,
+    customChains: [
+      {
+          network: "arb_sepolia",
+          chainId: 421614,
+          urls: {
+              apiURL: "https://api-sepolia.arbiscan.io/api",
+              browserURL: "https://sepolia.arbiscan.io/"
+          }
+      }
+    ]
   },
   abiExporter: {
     path: "./abi",
