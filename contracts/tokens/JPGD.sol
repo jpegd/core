@@ -32,7 +32,7 @@ contract JPGD is
     function mint(address to, uint256 amount) external {
         require(
             hasRole(MINTER_ROLE, _msgSender()),
-            "PETH: must have minter role to mint"
+            "JPGD: must have minter role to mint"
         );
         _mint(to, amount);
     }
@@ -46,7 +46,7 @@ contract JPGD is
     function pause() external {
         require(
             hasRole(PAUSER_ROLE, _msgSender()),
-            "PETH: must have pauser role to pause"
+            "JPGD: must have pauser role to pause"
         );
         _pause();
     }
@@ -60,7 +60,7 @@ contract JPGD is
     function unpause() external {
         require(
             hasRole(PAUSER_ROLE, _msgSender()),
-            "PETH: must have pauser role to unpause"
+            "JPGD: must have pauser role to unpause"
         );
         _unpause();
     }
