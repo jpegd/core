@@ -1,9 +1,11 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { ethers, network, upgrades } from "hardhat";
+import { id } from "@ethersproject/hash";
 import { JPGD, LPFarming, TestERC20 } from "../types";
-import { units, mineBlocks, checkAlmostSame, ZERO_ADDRESS } from "./utils";
-import { MINTER_ROLE } from "../deploy1/constants";
+import { units, mineBlocks, checkAlmostSame } from "./utils";
+
+export const MINTER_ROLE = id("MINTER_ROLE");
 
 describe("LPFarming", () => {
     let owner: SignerWithAddress,
@@ -479,7 +481,7 @@ describe("LPFarming", () => {
         );
     });
 
-    it("should allow to deposit underlying tokens", async () => {
+    it("should allow to deposit and withdraw underlying tokens", async () => {
         const TestERC20 = await ethers.getContractFactory("TestERC20");
         const underlyingToken = await TestERC20.deploy("", "");
 
@@ -488,10 +490,10 @@ describe("LPFarming", () => {
         );
         const depositContract = await MockDeposit.deploy(
             underlyingToken.address,
-            lpTokens[0].address
+            { numerator: 1, denominator: 2 }
         );
 
-        await farming.add(1, lpTokens[0].address);
+        await farming.add(1, depositContract.address);
 
         await farming.setUnderlyingInfo(
             0,
@@ -499,7 +501,6 @@ describe("LPFarming", () => {
             depositContract.address
         );
 
-        await lpTokens[0].mint(depositContract.address, units(500));
         await underlyingToken.mint(owner.address, units(1000));
         await underlyingToken.approve(farming.address, units(1000));
 
@@ -508,11 +509,21 @@ describe("LPFarming", () => {
         expect(
             await underlyingToken.balanceOf(depositContract.address)
         ).to.equal(units(1000));
-        expect(await lpTokens[0].balanceOf(farming.address)).to.equal(
+        expect(await depositContract.balanceOf(farming.address)).to.equal(
             units(500)
         );
 
-        const info = await farming.userInfo(0, owner.address);
+        let info = await farming.userInfo(0, owner.address);
         expect(info.amount).to.equal(units(500));
+
+        await farming.withdrawUnderlying(0, units(500));
+
+        expect(await underlyingToken.balanceOf(owner.address)).to.equal(
+            units(1000)
+        );
+        expect(await depositContract.balanceOf(farming.address)).to.equal(0);
+
+        info = await farming.userInfo(0, owner.address);
+        expect(info.amount).to.equal(0);
     });
 });

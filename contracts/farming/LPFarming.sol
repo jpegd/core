@@ -9,6 +9,8 @@ import "../utils/NoContractUpgradeable.sol";
 
 interface UnderlyingDepositContract {
     function deposit(address _to, uint256 _amount) external returns (uint256);
+
+    function withdraw(address _to, uint256 _shares) external returns (uint256);
 }
 
 /// @title JPEG'd LP Farming
@@ -276,23 +278,23 @@ contract LPFarming is ReentrancyGuardUpgradeable, NoContractUpgradeable {
     /// @param _pid The id of the pool to withdraw from
     /// @param _amount The amount of LP tokens to withdraw
     function withdraw(uint256 _pid, uint256 _amount) external noContract {
+        IERC20Upgradeable _lpToken = _withdraw(_pid, _amount);
+        _lpToken.safeTransfer(address(msg.sender), _amount);
+    }
+
+    function withdrawUnderlying(
+        uint256 _pid,
+        uint256 _amount
+    ) external noContract {
         if (_amount == 0) revert InvalidAmount();
 
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][msg.sender];
-        if (user.amount < _amount) revert InvalidAmount();
+        UnderlyingDepositInfo memory underlyingInfo = underlyingTokens[_pid];
+        if (address(underlyingInfo.underlyingToken) == address(0))
+            revert InvalidPID();
 
-        _updatePool(_pid);
-        _withdrawReward(_pid);
+        _withdraw(_pid, _amount);
 
-        pool.depositedAmount -= _amount;
-        unchecked {
-            user.amount -= _amount;
-        }
-
-        pool.lpToken.safeTransfer(address(msg.sender), _amount);
-
-        emit Withdraw(msg.sender, _pid, _amount);
+        underlyingInfo.depositContract.withdraw(msg.sender, _amount);
     }
 
     function _deposit(
@@ -310,6 +312,29 @@ contract LPFarming is ReentrancyGuardUpgradeable, NoContractUpgradeable {
         user.amount += _amount;
 
         emit Deposit(msg.sender, _pid, _amount);
+
+        return pool.lpToken;
+    }
+
+    function _withdraw(
+        uint256 _pid,
+        uint256 _amount
+    ) internal returns (IERC20Upgradeable) {
+        if (_amount == 0) revert InvalidAmount();
+
+        PoolInfo storage pool = poolInfo[_pid];
+        UserInfo storage user = userInfo[_pid][msg.sender];
+        if (user.amount < _amount) revert InvalidAmount();
+
+        _updatePool(_pid);
+        _withdrawReward(_pid);
+
+        pool.depositedAmount -= _amount;
+        unchecked {
+            user.amount -= _amount;
+        }
+
+        emit Withdraw(msg.sender, _pid, _amount);
 
         return pool.lpToken;
     }
