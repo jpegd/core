@@ -1,14 +1,17 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
-import { ethers, network } from "hardhat";
-import { JPEG, LPFarming, TestERC20 } from "../types";
-import { units, mineBlocks, checkAlmostSame, ZERO_ADDRESS } from "./utils";
+import { ethers, network, upgrades } from "hardhat";
+import { id } from "@ethersproject/hash";
+import { JPGD, LPFarming, TestERC20 } from "../types";
+import { units, mineBlocks, checkAlmostSame } from "./utils";
+
+export const MINTER_ROLE = id("MINTER_ROLE");
 
 describe("LPFarming", () => {
     let owner: SignerWithAddress,
         alice: SignerWithAddress,
         bob: SignerWithAddress;
-    let jpeg: JPEG, farming: LPFarming;
+    let jpgd: JPGD, farming: LPFarming;
     let lpTokens: TestERC20[] = [];
 
     beforeEach(async () => {
@@ -17,12 +20,14 @@ describe("LPFarming", () => {
         alice = accounts[1];
         bob = accounts[2];
 
-        const JPEG = await ethers.getContractFactory("JPEG");
-        jpeg = await JPEG.deploy(units(1000000000)); // 1B JPEG'd
-        await jpeg.deployed();
+        const JPGD = await ethers.getContractFactory("JPGD");
+        jpgd = await JPGD.deploy();
+        await jpgd.deployed();
 
         const LPFarming = await ethers.getContractFactory("LPFarming");
-        farming = await LPFarming.deploy(jpeg.address); // 100 JPEG per block
+        farming = <LPFarming>await upgrades.deployProxy(LPFarming, [], {
+            constructorArgs: [jpgd.address]
+        }); // 100 JPGD per block
         await farming.deployed();
 
         const TestERC20 = await ethers.getContractFactory("TestERC20");
@@ -40,13 +45,13 @@ describe("LPFarming", () => {
             lpTokens.push(token);
         }
 
-        await jpeg.approve(farming.address, units(1000000));
+        await jpgd.grantRole(MINTER_ROLE, owner.address);
+        await jpgd.mint(owner.address, units(1000000));
+        await jpgd.approve(farming.address, units(1000000));
     });
 
     it("should not allow the owner to renounce ownership", async () => {
-        await expect(farming.renounceOwnership()).to.be.revertedWith(
-            "Cannot renounce ownership"
-        );
+        await expect(farming.renounceOwnership()).to.be.reverted;
     });
 
     it("only owner can add pools", async () => {
@@ -93,38 +98,39 @@ describe("LPFarming", () => {
     });
 
     it("should not allow an epoch with invalid parameters", async () => {
-        await expect(farming.newEpoch(1, 1, 0)).to.be.revertedWith(
-            "Invalid start block"
+        await expect(farming.newEpoch(1, 1, 0)).to.be.revertedWithCustomError(
+            farming,
+            "InvalidBlock"
         );
         let blockNumber = await ethers.provider.getBlockNumber();
         await expect(
             farming.newEpoch(blockNumber + 2, blockNumber + 2, 0)
-        ).to.be.revertedWith("Invalid end block");
+        ).to.be.revertedWithCustomError(farming, "InvalidBlock");
         blockNumber = await ethers.provider.getBlockNumber();
         await expect(
             farming.newEpoch(blockNumber + 2, blockNumber + 3, 0)
-        ).to.be.revertedWith("Invalid reward per block");
+        ).to.be.revertedWithCustomError(farming, "InvalidAmount");
     });
 
     it("should update epoch", async () => {
         let blockNumber = await ethers.provider.getBlockNumber();
         await farming.newEpoch(blockNumber + 2, blockNumber + 12, 100);
-        expect(await jpeg.balanceOf(farming.address)).to.equal(1000);
+        expect(await jpgd.balanceOf(farming.address)).to.equal(1000);
 
         await mineBlocks(5);
         blockNumber = await ethers.provider.getBlockNumber();
         await farming.newEpoch(blockNumber + 2, blockNumber + 12, 100);
-        expect(await jpeg.balanceOf(farming.address)).to.equal(1500);
+        expect(await jpgd.balanceOf(farming.address)).to.equal(1500);
 
         await mineBlocks(5);
         blockNumber = await ethers.provider.getBlockNumber();
         await farming.newEpoch(blockNumber + 2, blockNumber + 12, 50);
-        expect(await jpeg.balanceOf(farming.address)).to.equal(1500);
+        expect(await jpgd.balanceOf(farming.address)).to.equal(1500);
 
         await mineBlocks(5);
         blockNumber = await ethers.provider.getBlockNumber();
         await farming.newEpoch(blockNumber + 2, blockNumber + 3, 100);
-        expect(await jpeg.balanceOf(farming.address)).to.equal(1350);
+        expect(await jpgd.balanceOf(farming.address)).to.equal(1350);
     });
 
     it("should not emit tokens outside of an epoch", async () => {
@@ -133,8 +139,14 @@ describe("LPFarming", () => {
         await farming.deposit(0, units(1000));
         await mineBlocks(1);
         expect(await farming.pendingReward(0, owner.address)).to.equal(0);
-        await expect(farming.claim(0)).to.be.revertedWith("no_reward");
-        await expect(farming.claimAll()).to.be.revertedWith("no_reward");
+        await expect(farming.claim(0)).to.be.revertedWithCustomError(
+            farming,
+            "NoReward"
+        );
+        await expect(farming.claimAll()).to.be.revertedWithCustomError(
+            farming,
+            "NoReward"
+        );
         const blockNumber = await ethers.provider.getBlockNumber();
         await farming.newEpoch(blockNumber + 2, blockNumber + 4, 1);
         await mineBlocks(1);
@@ -166,14 +178,17 @@ describe("LPFarming", () => {
 
     it("should not allow 0 token deposits or withdrawals", async () => {
         await farming.add(10, lpTokens[0].address);
-        await expect(farming.deposit(0, 0)).to.be.revertedWith(
-            "invalid_amount"
+        await expect(farming.deposit(0, 0)).to.be.revertedWithCustomError(
+            farming,
+            "InvalidAmount"
         );
-        await expect(farming.withdraw(0, 0)).to.be.revertedWith(
-            "invalid_amount"
+        await expect(farming.withdraw(0, 0)).to.be.revertedWithCustomError(
+            farming,
+            "InvalidAmount"
         );
-        await expect(farming.withdraw(0, 1)).to.be.revertedWith(
-            "insufficient_amount"
+        await expect(farming.withdraw(0, 1)).to.be.revertedWithCustomError(
+            farming,
+            "InvalidAmount"
         );
     });
 
@@ -192,11 +207,11 @@ describe("LPFarming", () => {
             blockNumber + 100000000000000,
             100
         );
-        await jpeg.transfer(jpeg.address, await jpeg.balanceOf(owner.address));
+        await jpgd.transfer(jpgd.address, await jpgd.balanceOf(owner.address));
 
-        await farming.add(20, lpTokens[0].address); // 50 JPEG per block
-        await farming.add(10, lpTokens[1].address); // 25 JPEG per block
-        await farming.add(10, lpTokens[2].address); // 25 JPEG per block
+        await farming.add(20, lpTokens[0].address); // 50 JPGD per block
+        await farming.add(10, lpTokens[1].address); // 25 JPGD per block
+        await farming.add(10, lpTokens[2].address); // 25 JPGD per block
 
         await lpTokens[0].transfer(alice.address, units(1000));
         await lpTokens[0].transfer(bob.address, units(1000));
@@ -246,7 +261,7 @@ describe("LPFarming", () => {
         );
 
         await farming.claim(0);
-        checkAlmostSame(await jpeg.balanceOf(owner.address), owner_reward);
+        checkAlmostSame(await jpgd.balanceOf(owner.address), owner_reward);
         owner_reward = 0;
 
         console.log("2: ");
@@ -352,7 +367,7 @@ describe("LPFarming", () => {
         );
 
         await farming.connect(alice).claimAll();
-        checkAlmostSame(await jpeg.balanceOf(alice.address), alice_reward);
+        checkAlmostSame(await jpgd.balanceOf(alice.address), alice_reward);
         alice_reward = 0;
 
         console.log("5: ");
@@ -421,7 +436,7 @@ describe("LPFarming", () => {
         );
 
         await farming.connect(bob).claim(0);
-        checkAlmostSame(await jpeg.balanceOf(bob.address), bob_reward);
+        checkAlmostSame(await jpgd.balanceOf(bob.address), bob_reward);
         bob_reward = 0;
 
         console.log("7: ");
@@ -457,12 +472,58 @@ describe("LPFarming", () => {
         );
 
         const balanceBefore = ethers.BigNumber.from(
-            await jpeg.balanceOf(owner.address)
+            await jpgd.balanceOf(owner.address)
         );
         await farming.claimAll();
         checkAlmostSame(
-            await jpeg.balanceOf(owner.address),
+            await jpgd.balanceOf(owner.address),
             balanceBefore.add(owner_reward)
         );
+    });
+
+    it("should allow to deposit and withdraw underlying tokens", async () => {
+        const TestERC20 = await ethers.getContractFactory("TestERC20");
+        const underlyingToken = await TestERC20.deploy("", "");
+
+        const MockDeposit = await ethers.getContractFactory(
+            "MockUnderlyingDeposit"
+        );
+        const depositContract = await MockDeposit.deploy(
+            underlyingToken.address,
+            { numerator: 1, denominator: 2 }
+        );
+
+        await farming.add(1, depositContract.address);
+
+        await farming.setUnderlyingInfo(
+            0,
+            underlyingToken.address,
+            depositContract.address
+        );
+
+        await underlyingToken.mint(owner.address, units(1000));
+        await underlyingToken.approve(farming.address, units(1000));
+
+        await farming.depositUnderlying(0, units(1000));
+
+        expect(
+            await underlyingToken.balanceOf(depositContract.address)
+        ).to.equal(units(1000));
+        expect(await depositContract.balanceOf(farming.address)).to.equal(
+            units(500)
+        );
+
+        let info = await farming.userInfo(0, owner.address);
+        expect(info.amount).to.equal(units(500));
+
+        await farming.withdrawUnderlying(0, units(500));
+
+        expect(await underlyingToken.balanceOf(owner.address)).to.equal(
+            units(1000)
+        );
+        expect(await depositContract.balanceOf(farming.address)).to.equal(0);
+
+        info = await farming.userInfo(0, owner.address);
+        expect(info.amount).to.equal(0);
     });
 });

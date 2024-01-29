@@ -1,20 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
-import "../utils/NoContract.sol";
+import "../utils/NoContractUpgradeable.sol";
+
+interface UnderlyingDepositContract {
+    function deposit(address _to, uint256 _amount) external returns (uint256);
+
+    function withdraw(address _to, uint256 _shares) external returns (uint256);
+}
 
 /// @title JPEG'd LP Farming
 /// @notice Users can stake their JPEG'd ecosystem LP tokens to get JPEG rewards
-/// @dev This contract doesn't mint JPEG tokens, instead the owner (the JPEG'd DAO) allocates x amount of JPEG to be distributed as a reward for liquidity providers.
+/// @dev This contract doesn't mint JPEG tokens, instead the owner (the JPEG'd DAO) allocates x amount of JPGD to be distributed as a reward for liquidity providers.
 /// To ensure that enough tokens are allocated, an epoch system is implemented.
 /// The owner is required to allocate enough tokens (`_rewardPerBlock * (_endBlock - _startBlock)`) when creating a new epoch.
 /// When there no epoch is ongoing, the contract stops emitting rewards
-contract LPFarming is ReentrancyGuard, NoContract {
-    using SafeERC20 for IERC20;
+contract LPFarming is ReentrancyGuardUpgradeable, NoContractUpgradeable {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+
+    error InvalidBlock();
+    error InvalidAmount();
+    error ZeroAddress();
+    error InvalidPID();
+    error NoReward();
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -36,11 +48,16 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @param accRewardPerShare Accumulated rewards per share, times 1e36. The amount of rewards the pool has accumulated per unit of LP token deposited
     /// @param depositedAmount Total number of tokens deposited in the pool.
     struct PoolInfo {
-        IERC20 lpToken;
+        IERC20Upgradeable lpToken;
         uint256 allocPoint;
         uint256 lastRewardBlock;
         uint256 accRewardPerShare;
         uint256 depositedAmount;
+    }
+
+    struct UnderlyingDepositInfo {
+        IERC20Upgradeable underlyingToken;
+        UnderlyingDepositContract depositContract;
     }
 
     /// @dev Data relative to an epoch
@@ -53,8 +70,9 @@ contract LPFarming is ReentrancyGuard, NoContract {
         uint256 rewardPerBlock;
     }
 
-    /// @notice The reward token, JPEG
-    IERC20 public immutable jpeg;
+    /// @notice The reward token, JPGD
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    IERC20Upgradeable public immutable jpgd;
 
     /// @notice The current epoch
     /// @dev We don't need to store data about previous epochs, to simplify logic we only store data about the current epoch
@@ -70,9 +88,16 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @dev User's withdrawable rewards per pool
     mapping(address => mapping(uint256 => uint256)) private userRewards;
 
-    /// @param _jpeg The reward token
-    constructor(address _jpeg) {
-        jpeg = IERC20(_jpeg);
+    mapping(uint256 => UnderlyingDepositInfo) public underlyingTokens;
+
+    /// @param _jpgd The reward token
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor(address _jpgd) {
+        jpgd = IERC20Upgradeable(_jpgd);
+    }
+
+    function initialize() external initializer {
+        __noContract_init();
     }
 
     /// @notice Allows the owner to start a new epoch. Can only be called when there's no ongoing epoch
@@ -85,9 +110,9 @@ contract LPFarming is ReentrancyGuard, NoContract {
         uint256 _rewardPerBlock
     ) external onlyOwner {
         if (_startBlock == 0) _startBlock = block.number;
-        else require(_startBlock >= block.number, "Invalid start block");
-        require(_endBlock > _startBlock, "Invalid end block");
-        require(_rewardPerBlock != 0, "Invalid reward per block");
+        else if (_startBlock < block.number) revert InvalidBlock();
+        if (_endBlock <= _startBlock) revert InvalidBlock();
+        if (_rewardPerBlock == 0) revert InvalidAmount();
 
         //update all pools to ensure that they have all been updated up to the last epoch's `endBlock`
         _massUpdatePools();
@@ -102,11 +127,11 @@ contract LPFarming is ReentrancyGuard, NoContract {
 
         if (remainingRewards > newRewards) {
             unchecked {
-                jpeg.safeTransfer(msg.sender, remainingRewards - newRewards);
+                jpgd.safeTransfer(msg.sender, remainingRewards - newRewards);
             }
         } else if (remainingRewards < newRewards) {
             unchecked {
-                jpeg.safeTransferFrom(
+                jpgd.safeTransferFrom(
                     msg.sender,
                     address(this),
                     newRewards - remainingRewards
@@ -118,7 +143,10 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @notice Allows the owner to add a new pool
     /// @param _allocPoint Allocation points to assign to the new pool
     /// @param _lpToken The LP token accepted by the new pool
-    function add(uint256 _allocPoint, IERC20 _lpToken) external onlyOwner {
+    function add(
+        uint256 _allocPoint,
+        IERC20Upgradeable _lpToken
+    ) external onlyOwner {
         _massUpdatePools();
 
         uint256 lastRewardBlock = _blockNumber();
@@ -145,6 +173,26 @@ contract LPFarming is ReentrancyGuard, NoContract {
         if (prevAllocPoint != _allocPoint) {
             totalAllocPoint = totalAllocPoint - prevAllocPoint + _allocPoint;
         }
+    }
+
+    function setUnderlyingInfo(
+        uint256 _pid,
+        IERC20Upgradeable _underlyingToken,
+        UnderlyingDepositContract _depositContract
+    ) external onlyOwner {
+        if (
+            address(_underlyingToken) == address(0) ||
+            address(_depositContract) == address(0)
+        ) revert ZeroAddress();
+
+        underlyingTokens[_pid] = UnderlyingDepositInfo(
+            _underlyingToken,
+            _depositContract
+        );
+    }
+
+    function deleteUnderlyingInfo(uint256 _pid) external onlyOwner {
+        delete underlyingTokens[_pid];
     }
 
     /// @notice Returns the number of pools available
@@ -192,7 +240,68 @@ contract LPFarming is ReentrancyGuard, NoContract {
     /// @param _pid The id of the pool to deposit into
     /// @param _amount The amount of LP tokens to deposit
     function deposit(uint256 _pid, uint256 _amount) external noContract {
-        require(_amount != 0, "invalid_amount");
+        IERC20Upgradeable _lpToken = _deposit(_pid, _amount);
+        _lpToken.safeTransferFrom(msg.sender, address(this), _amount);
+    }
+
+    function depositUnderlying(
+        uint256 _pid,
+        uint256 _amount
+    ) external noContract {
+        if (_amount == 0) revert InvalidAmount();
+
+        UnderlyingDepositInfo memory underlyingInfo = underlyingTokens[_pid];
+        if (address(underlyingInfo.underlyingToken) == address(0))
+            revert InvalidPID();
+
+        underlyingInfo.underlyingToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _amount
+        );
+
+        underlyingInfo.underlyingToken.approve(
+            address(underlyingInfo.depositContract),
+            _amount
+        );
+
+        uint256 _receivedTokens = underlyingInfo.depositContract.deposit(
+            address(this),
+            _amount
+        );
+
+        _deposit(_pid, _receivedTokens);
+    }
+
+    /// @notice Allows users to withdraw `_amount` of LP tokens from the pool with id `_pid`. Non whitelisted contracts can't call this function
+    /// @dev Emits a {Withdraw} event
+    /// @param _pid The id of the pool to withdraw from
+    /// @param _amount The amount of LP tokens to withdraw
+    function withdraw(uint256 _pid, uint256 _amount) external noContract {
+        IERC20Upgradeable _lpToken = _withdraw(_pid, _amount);
+        _lpToken.safeTransfer(address(msg.sender), _amount);
+    }
+
+    function withdrawUnderlying(
+        uint256 _pid,
+        uint256 _amount
+    ) external noContract {
+        if (_amount == 0) revert InvalidAmount();
+
+        UnderlyingDepositInfo memory underlyingInfo = underlyingTokens[_pid];
+        if (address(underlyingInfo.underlyingToken) == address(0))
+            revert InvalidPID();
+
+        _withdraw(_pid, _amount);
+
+        underlyingInfo.depositContract.withdraw(msg.sender, _amount);
+    }
+
+    function _deposit(
+        uint256 _pid,
+        uint256 _amount
+    ) internal returns (IERC20Upgradeable) {
+        if (_amount == 0) revert InvalidAmount();
 
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
@@ -201,21 +310,21 @@ contract LPFarming is ReentrancyGuard, NoContract {
 
         pool.depositedAmount += _amount;
         user.amount += _amount;
-        pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
 
         emit Deposit(msg.sender, _pid, _amount);
+
+        return pool.lpToken;
     }
 
-    /// @notice Allows users to withdraw `_amount` of LP tokens from the pool with id `_pid`. Non whitelisted contracts can't call this function
-    /// @dev Emits a {Withdraw} event
-    /// @param _pid The id of the pool to withdraw from
-    /// @param _amount The amount of LP tokens to withdraw
-    function withdraw(uint256 _pid, uint256 _amount) external noContract {
-        require(_amount != 0, "invalid_amount");
+    function _withdraw(
+        uint256 _pid,
+        uint256 _amount
+    ) internal returns (IERC20Upgradeable) {
+        if (_amount == 0) revert InvalidAmount();
 
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-        require(user.amount >= _amount, "insufficient_amount");
+        if (user.amount < _amount) revert InvalidAmount();
 
         _updatePool(_pid);
         _withdrawReward(_pid);
@@ -225,9 +334,9 @@ contract LPFarming is ReentrancyGuard, NoContract {
             user.amount -= _amount;
         }
 
-        pool.lpToken.safeTransfer(address(msg.sender), _amount);
-
         emit Withdraw(msg.sender, _pid, _amount);
+
+        return pool.lpToken;
     }
 
     /// @dev Normalizes the current `block.number`. See {_normalizeBlockNumber} for more info
@@ -310,35 +419,35 @@ contract LPFarming is ReentrancyGuard, NoContract {
         _updatePool(_pid);
         _withdrawReward(_pid);
 
-        uint256 rewards = userRewards[msg.sender][_pid];
-        require(rewards != 0, "no_reward");
+        uint256 _rewards = userRewards[msg.sender][_pid];
+        if (_rewards == 0) revert NoReward();
 
         userRewards[msg.sender][_pid] = 0;
-        jpeg.safeTransfer(msg.sender, rewards);
+        jpgd.safeTransfer(msg.sender, _rewards);
 
-        emit Claim(msg.sender, _pid, rewards);
+        emit Claim(msg.sender, _pid, _rewards);
     }
 
     /// @notice Allows users to claim rewards from all pools. Non whitelisted contracts can't call this function
     /// @dev Emits a {ClaimAll} event
     function claimAll() external nonReentrant noContract {
-        uint256 length = poolInfo.length;
-        uint256 rewards;
-        for (uint256 i; i < length; ++i) {
+        uint256 _length = poolInfo.length;
+        uint256 _rewards;
+        for (uint256 i; i < _length; ++i) {
             _updatePool(i);
             _withdrawReward(i);
-            rewards += userRewards[msg.sender][i];
+            _rewards += userRewards[msg.sender][i];
             userRewards[msg.sender][i] = 0;
         }
-        require(rewards != 0, "no_reward");
+        if (_rewards == 0) revert NoReward();
 
-        jpeg.safeTransfer(msg.sender, rewards);
+        jpgd.safeTransfer(msg.sender, _rewards);
 
-        emit ClaimAll(msg.sender, rewards);
+        emit ClaimAll(msg.sender, _rewards);
     }
 
     /// @dev Prevent the owner from renouncing ownership. Having no owner would render this contract unusable due to the inability to create new epochs
     function renounceOwnership() public view override onlyOwner {
-        revert("Cannot renounce ownership");
+        revert("");
     }
 }
