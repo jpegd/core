@@ -9,6 +9,8 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "../interfaces/INFTVault.sol";
 import "../interfaces/IAggregatorV3Interface.sol";
 import "../interfaces/IJPEGAuction.sol";
+import "../interfaces/ISynthsController.sol";
+import "../interfaces/ISynthsDebtAggregator.sol";
 
 /// @title Liquidator escrow contract
 /// @notice Liquidator contract that allows liquidator bots to liquidate positions without holding any stablecoins/NFTs.
@@ -39,11 +41,22 @@ contract Liquidator is OwnableUpgradeable {
     mapping(IERC20Upgradeable => OracleInfo) public stablecoinOracle;
     mapping(INFTVault => VaultInfo) public vaultInfo;
 
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    ISynthsController public immutable SYNTHS_CONTROLLER;
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    IERC20Upgradeable public immutable PETH;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _auction) {
-        if (_auction == address(0)) revert ZeroAddress();
+    constructor(address _auction, address _controller, address _peth) {
+        if (
+            _auction == address(0) ||
+            _controller == address(0) ||
+            _peth == address(0)
+        ) revert ZeroAddress();
 
         AUCTION = IJPEGAuction(_auction);
+        SYNTHS_CONTROLLER = ISynthsController(_controller);
+        PETH = IERC20Upgradeable(_peth);
     }
 
     function initialize() external initializer {
@@ -117,6 +130,44 @@ contract Liquidator is OwnableUpgradeable {
 
         //reset appoval
         _vaultInfo.stablecoin.approve(address(_nftVault), 0);
+    }
+
+    /// @notice Allows any address to liquidate multiple synths positions at once.
+    /// It assumes enough stablecoin is in the contract.
+    /// The liquidated stablecoin is sent to the DAO.
+    /// This function can be called by anyone, however the address calling it doesn't get any stablecoins.
+    /// @dev This function doesn't revert if one of the positions is not liquidatable.
+    /// This is done to prevent situations in which multiple positions can't be liquidated
+    /// because of one non-liquidatable position.
+    /// It reverts on insufficient balance.
+    /// @param _toLiquidate The position ids to liquidate
+    function liquidateSynths(uint256[] memory _toLiquidate) external {
+        uint256 _length = _toLiquidate.length;
+        if (_length == 0) revert InvalidLength();
+
+        address _debtVault = ISynthsDebtAggregator(
+            SYNTHS_CONTROLLER.debtAggregator()
+        ).debtVaults(address(PETH)).vaultAddress;
+
+        uint256 _balance = PETH.balanceOf(address(this));
+        PETH.approve(address(_debtVault), _balance);
+
+        for (uint256 i; i < _length; ++i) {
+            uint256 _positionId = _toLiquidate[i];
+
+            try
+                SYNTHS_CONTROLLER.liquidate(_positionId, owner())
+            {} catch Error(string memory _reason) {
+                //insufficient allowance -> insufficient balance
+                if (
+                    keccak256(abi.encodePacked(_reason)) ==
+                    keccak256(abi.encodePacked("ERC20: insufficient allowance"))
+                ) revert InsufficientBalance(PETH);
+            }
+        }
+
+        //reset appoval
+        PETH.approve(address(_debtVault), 0);
     }
 
     /// @notice Allows any address to claim NFTs from multiple expired insurance postions at once.

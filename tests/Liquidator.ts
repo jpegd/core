@@ -10,7 +10,9 @@ import {
     TestERC20,
     TestERC721,
     CryptoPunks,
-    CryptoPunksHelper
+    CryptoPunksHelper,
+    ISynthsController,
+    ISynthsDebtAggregator
 } from "../types";
 import { ZERO_ADDRESS, units } from "./utils";
 
@@ -28,7 +30,9 @@ describe("Liquidator", () => {
         punks: CryptoPunks,
         punksHelper: CryptoPunksHelper;
     let nftVault: FakeContract<NFTVault>,
-        oracle: FakeContract<IAggregatorV3Interface>;
+        oracle: FakeContract<IAggregatorV3Interface>,
+        synthsDebtAggregator: FakeContract<ISynthsDebtAggregator>,
+        synthsController: FakeContract<ISynthsController>;
 
     beforeEach(async () => {
         const accounts = await ethers.getSigners();
@@ -58,9 +62,16 @@ describe("Liquidator", () => {
             ])
         );
 
+        synthsDebtAggregator = await smock.fake("ISynthsDebtAggregator");
+        synthsController = await smock.fake("ISynthsController");
+
         const Liquidator = await ethers.getContractFactory("Liquidator");
         liquidator = <Liquidator>await upgrades.deployProxy(Liquidator, [], {
-            constructorArgs: [auction.address]
+            constructorArgs: [
+                auction.address,
+                synthsController.address,
+                stablecoin.address
+            ]
         });
 
         nftVault = await smock.fake("NFTVault");
@@ -526,6 +537,41 @@ describe("Liquidator", () => {
                     );
                 });
             });
+        });
+    });
+
+    describe("Synths Liquidation", () => {
+        beforeEach(async () => {
+            synthsController.debtAggregator.returns(
+                synthsDebtAggregator.address
+            );
+            synthsDebtAggregator.debtVaults
+                .whenCalledWith(stablecoin.address)
+                .returns({
+                    vaultAddress: "0x1000000000000000000000000000000000000000", // random address
+                    assetDecimals: 18
+                });
+        });
+
+        it("should liquidate", async () => {
+            await liquidator.liquidateSynths([1]);
+            await expect(
+                synthsController.liquidate
+            ).to.have.been.calledOnceWith(1, owner.address);
+            await expect(
+                synthsDebtAggregator.debtVaults
+            ).to.have.been.calledOnceWith(stablecoin.address);
+
+            await liquidator.liquidateSynths([0, 1, 2]);
+            await expect(synthsController.liquidate).to.have.been.callCount(4);
+            await expect(synthsDebtAggregator.debtVaults).to.have.been
+                .calledTwice;
+        });
+
+        it("should revert on invalid call", async () => {
+            await expect(
+                liquidator.liquidateSynths([])
+            ).to.be.revertedWithCustomError(liquidator, "InvalidLength");
         });
     });
 });
